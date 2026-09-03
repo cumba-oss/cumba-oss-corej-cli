@@ -423,7 +423,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: release-jars
-          path: clients/*/target/*-${{ steps.ver.outputs.version }}.jar
+          # ⚠ target/, not clients/*/target/. This repository is a SINGLE MODULE now --
+          #   the root pom IS the artifact -- so the old multi-module glob would
+          #   match nothing, and upload-artifact only WARNS on a no-match.
+          path: target/*-${{ steps.ver.outputs.version }}.jar
           # ⚠ clients/, not lib/ — this repo's modules live under clients/. The
           #    scaffold's lib/ glob matched NOTHING here, and because these modules
           #    are not published to Central the GitHub release is the ONLY delivery:
