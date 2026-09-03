@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Project-wide SpotBugs exclude filter. Applied to every module in
+    addition to that module's own spotbugs_ignore.xml (if any). Wired
+    via the parent pom's `<excludeFilterFile>` reference in
+    pluginManagement and the `spotbugs-module-ignore` profile.
+
+    Only categories that are structurally false-positive in this
+    project belong here. Module-specific suppressions (a single
+    class/field tuple) stay in the per-module spotbugs_ignore.xml.
+-->
+<FindBugsFilter>
+
+    <Match>
+        <!-- The project does not use Java Object Serialization anywhere.
+             Persisted state is Jackson JSON end-to-end (config files,
+             remote-RPC wire format, validation reports, etc.). Swing
+             components and Jackson types inherit Serializable transitively
+             but no class is ever written via ObjectOutputStream.
+
+             Non-Serializable instance fields are marked `transient` to
+             silence the javac [serial] lint. SpotBugs then flags those
+             transient fields as "not restored on deserialisation" — true
+             but irrelevant: the deserialisation path is never exercised. -->
+        <Bug pattern="SE_TRANSIENT_FIELD_NOT_RESTORED" />
+    </Match>
+
+    <Match>
+        <!--
+            Reported only since SpotBugs 4.10.0, which added *partial* JSpecify support:
+
+              "Add partial support for org.jspecify.annotations.Nullable ... aliased to the
+               closest existing SpotBugs nullness annotations. This is not a complete
+               implementation of the JSpecify spec."
+
+            This project completed a repo-wide JSpecify rollout, so 4.10 suddenly sees
+            @Nullable annotations that 4.9.8.3 ignored entirely. Measured in THIS repository
+            on 2026-09-02, with the SpotBugs bump to 4.10.4.0: cumba-oss-cdisc-core reports
+            188 of this pattern where 4.9.8.3 reported none. They concentrate in the tolerant
+            wire-format CDISC rule model, whose Lombok @Data getters return @Nullable fields:
+            Rule 48, Operation 44, CheckConditionLeaf 23, RulePackage 15, Scope 9,
+            MatchDataset 8.
+
+            Those 188 were classified, not assumed: all 22 distinct callees are inside
+            net.cumba (ZERO third-party callees), and the 12 findings carrying no
+            METHOD_CALLED role are self-calls within net.cumba.cdisc.core.
+
+            NullAway already enforces exactly this contract over exactly that surface, with a
+            COMPLETE JSpecify implementation, and more strictly than SpotBugs is being asked
+            to: the NullAway profile (active unless -Dnullaway.disabled) sets
+            -Xep:NullAway:ERROR with JSpecifyMode=true, AcknowledgeRestrictiveAnnotations=true
+            and AnnotatedPackages=net.cumba, and the build is green under it. So this pattern
+            is duplicate coverage from an admittedly partial implementation, and the complete
+            checker is the one to trust. Because the callee set is entirely net.cumba, the
+            suppressed set is a strict SUBSET of NullAway's domain; nothing is hidden that
+            NullAway does not already see.
+
+            THE SUBSET PROPERTY IS A MEASUREMENT, NOT AN INVARIANT THIS FILTER ENFORCES.
+            A SpotBugs Match cannot say "only when the callee is outside net.cumba", so this
+            entry is unconditional and will also silence the one category SpotBugs would
+            genuinely add over NullAway: a null-returning callee OUTSIDE net.cumba, which
+            NullAway treats as non-null because the package is unannotated. Two things bound
+            that risk today: the measured count of such findings is ZERO, and 4.9.8.3 (whose
+            NP dataflow does not depend on JSpecify at all) found zero findings repo-wide in
+            this codebase.
+
+            SO: RE-RUN THE CALLEE CLASSIFICATION ON EVERY SpotBugs BUMP, not just this one.
+            The check is: for each NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE in every
+            target/spotbugsXml.xml, read the Method element whose role is METHOD_CALLED and
+            confirm its classname starts with net.cumba. If any does not, that finding is NOT
+            covered by NullAway and must be triaged on its own merits before this filter is
+            kept.
+
+            Revisit if SpotBugs completes its JSpecify implementation, or if NullAway is ever
+            removed or demoted below ERROR.
+        -->
+        <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE" />
+    </Match>
+
+    <Match>
+        <!--
+            Also new in 4.10.x. Both occurrences in this repo are the same intentional shape:
+            a nested factory widening a protected SPI accessor to public so the enclosing
+            class can drive it - FunctionRegistry$ProviderFactory.getSuppliers and
+            ServiceReportManager$SupplierFactory.getSuppliers, each a bare
+            `return super.getSuppliers();`. Widening on override is the point; nothing that
+            was meant to stay hidden is exposed. Both re-verified present in
+            cumba-oss-cdisc-core on 2026-09-02.
+        -->
+        <Bug pattern="IAOM_DO_NOT_INCREASE_METHOD_ACCESSIBILITY" />
+    </Match>
+
+</FindBugsFilter>
