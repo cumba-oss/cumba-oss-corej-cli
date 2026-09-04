@@ -1163,7 +1163,7 @@
                                     to the internal Nexus. This exclusion is what stops a tag staging it.
                             
                                     Single-module repo now, so the former parent and the coverage aggregator no
-                                    longer exist, and cumba-oss-cdisc-rest has moved to its own repository.
+                                    longer exist, and cumba-oss-corej-rest has moved to its own repository.
                                     Those three entries are deleted rather than left as dead text.
                                 -->
                                 <excludeArtifact>cumba-oss-corej-cli</excludeArtifact>
