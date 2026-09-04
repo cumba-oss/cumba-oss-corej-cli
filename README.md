@@ -35,13 +35,18 @@ The libraries this client consumes *are* on Central, released separately on thei
 
 ## Releases
 
-Tagging `vX.Y.Z` builds, signs and attaches two files to the release, on both the GitHub and the
-Gitea mirror:
+Tagging `vX.Y.Z` builds, signs and attaches **four** files to the release, on both the GitHub and
+the Gitea mirror:
 
 ```
-cumba-oss-corej-cli-<version>.jar
+cumba-oss-corej-cli-<version>.zip        ← the runnable distribution
+cumba-oss-corej-cli-<version>.zip.asc
+cumba-oss-corej-cli-<version>.jar        ← the plain artifact, also on Nexus
 cumba-oss-corej-cli-<version>.jar.asc
 ```
+
+⭐ **The zip is what you run** (§ Running). The jar is kept for consumers who assemble their own
+classpath; on its own it is not runnable.
 
 The two releases are cut independently from the same tag by
 `.github/workflows/ci.yml` and `.gitea/workflows/main.yml`; the Gitea run additionally deploys to
@@ -55,21 +60,24 @@ assets.
 
 ### Verifying a release asset
 
-Each jar is signed with the same GPG key as the project's Maven Central artifacts — one
-trust root, not two. Nothing here reaches Central, so the release asset is the **only**
-delivery, and a release asset **can be replaced in place** by anyone with write access:
-unlike an immutable Central artifact, the signature is the only thing standing between you
-and a swapped jar.
+**Every asset is signed** — the zip as well as the jar — with the same GPG key as the project's
+Maven Central artifacts, one trust root rather than two. Nothing here reaches Central, so the
+release asset is the **only** delivery, and a release asset **can be replaced in place** by anyone
+with write access: unlike an immutable Central artifact, the signature is the only thing standing
+between you and a swapped file.
+
+⚠ Verify the asset you actually intend to run. For most people that is the **zip**:
 
 ```bash
 curl -sLO <asset-url> && curl -sLO <asset-url>.asc
-gpg --verify cumba-oss-corej-cli-<version>.jar.asc cumba-oss-corej-cli-<version>.jar
+gpg --verify cumba-oss-corej-cli-<version>.zip.asc cumba-oss-corej-cli-<version>.zip
+# and the same two lines with .jar, if you are consuming the jar
 ```
 
 Key fingerprint: `AE5AA7685BED3FC5DF4AE8DD7727EF25F931AF6B`
 
-⚠ **Release assets are mutable**, unlike Central artifacts. The signature proves a jar is
-authentic; **your pinned hash proves *which* authentic jar you adopted.** Record both, and
+⚠ **Release assets are mutable**, unlike Central artifacts. The signature proves an asset is
+authentic; **your pinned hash proves *which* authentic asset you adopted.** Record both, and
 don't assume re-downloading a tag returns the same bytes.
 
 ## Build
@@ -110,20 +118,67 @@ deploy and the release.
 
 ## Running
 
-The build produces a **plain jar with a `Main-Class`** (`net.cumba.corej.cli.CdiscValidate`) plus
-a sibling `libs/` directory: `maven-dependency-plugin` stages the runtime dependencies into
-`target/libs/`, and the manifest's `Class-Path` refers to them with the `libs/` prefix.
+### From a release — the distribution zip
+
+Every release carries **`cumba-oss-corej-cli-<version>.zip`**, a self-contained runnable
+bundle. Download it (and its `.asc`, see *Verifying a release asset*), unzip, run:
+
+```bash
+unzip cumba-oss-corej-cli-<version>.zip
+cd cumba-oss-corej-cli-<version>
+./run.sh --help            # run.bat on Windows
+```
+
+```
+cumba-oss-corej-cli-<version>/
+├── cumba-oss-corej-cli.jar     the cumba-oss-bootstrap launcher
+├── cumba-oss-corej-cli.conf    its configuration — edit freely, no rebuild
+├── run.sh   run.bat
+├── rules/  rules-define/  dictionaries/    ship empty; each has a README
+└── lib/                        the application jar and every dependency
+```
+
+The bundle is **relocatable** — move it anywhere, invoke `run.sh` by any path, from any working
+directory. `JAVA_OPTS` is passed through to the JVM (`JAVA_OPTS=-Xmx8g ./run.sh …`).
+
+`cumba-oss-corej-cli.jar` is not the application: it is
+[`cumba-oss-bootstrap`](https://github.com/cumba-oss/cumba-oss-commons), a dependency-free
+launcher that reads the sidecar `.conf` beside it, applies its `[properties]` as system
+properties, assembles the `lib/` classpath and invokes `net.cumba.corej.cli.CdiscValidate`.
+⚠ **The jar and the `.conf` must keep the same basename** — the lookup is "strip `.jar`, append
+`.conf`, look beside me". Rename one, rename both, or pass `-Dbootstrap.config=<path>`.
+
+Everything an operator normally needs to change lives in that `.conf`: where the rule corpus,
+the Define-XML corpus and the dictionary store are (defaulted to the bundle's own directories,
+with the `COREJ_*` environment variables still winning), and any extra system properties.
+
+### From a checkout
+
+`mvn package` also produces the plain application jar with a `Main-Class`
+(`net.cumba.corej.cli.CdiscValidate`) and stages its dependencies into `target/libs/`, which the
+manifest's `Class-Path` references with a `libs/` prefix:
 
 ```bash
 java -jar target/cumba-oss-corej-cli-0.1.0-SNAPSHOT.jar --help
 ```
 
-⛔ **The release asset is the jar alone — `libs/` is not attached.** Both workflows upload
-`target/*-<version>.jar` and nothing else, and a `Class-Path` entry that is missing is ignored
-rather than reported, so a downloaded jar run with `java -jar` starts and then dies on the first
-class it cannot load. Until a bundle asset exists (the monorepo's `dist/` assembly modules did
-not come across the split), a consumer of the release has to supply the classpath itself, or
-build from a checkout as above.
+⚠ **That works only while `libs/` sits beside the jar.** A manifest `Class-Path` resolves
+relative to the jar's own location, not the working directory — so the jar keeps working wherever
+you invoke it from, as long as `libs/` travels with it. The jar **copied out of `target/` on its
+own** does not: a missing
+`Class-Path` entry is ignored rather than reported, so it starts and then dies on the first class
+it cannot load. This is why the release asset is the zip
+— it was previously the jar alone, and a `--help` run hid the problem because picocli prints its
+banner before the engine is touched. `mvn package` builds the zip too, at
+`target/cumba-oss-corej-cli-<version>.zip`, and the same tree exploded at
+`target/cumba-oss-corej-cli-<version>/cumba-oss-corej-cli-<version>/` for `src/test/smoke.sh`.
+
+⚠ **Two levels, not one.** The assembly's `dir` format nests its `<baseDirectory>` inside the
+execution's `<finalName>`, so the bundle root is the doubled path above — pointing the smoke
+script at the outer directory reports `bundle is missing run.sh` on a perfectly good build.
+
+The jar is still published to Nexus and still attached to the release, for consumers who put it
+on a classpath they manage themselves.
 
 ### Selecting rules
 
@@ -182,6 +237,26 @@ vendored here — it is released separately, as signed archives, from
 | Data rule packages | `--rules-dir <dir>` | `COREJ_RULES_DIR`, then `-Dcorej.rules.dir`, then `./rules` |
 | Define-XML packages (for `-vx`) | `--define-rules-dir <dir>` | `COREJ_DEFINE_RULES_DIR`, then `-Dcorej.define.rules.dir`, then `./rules-define` |
 | External dictionaries | `--dictionaries-dir <dir>` | `COREJ_DICTIONARIES_DIR`, then `-Dcorej.dictionariesDir`, then `./dictionaries` |
+
+⭐ **In the distribution zip all three are already pointed at the bundle**, so the last column's
+CWD-relative default never applies. `cumba-oss-corej-cli.conf` sets each system property to
+`${env:COREJ_…:-${sys:<property>:-${bootstrap.dir}/<dir>}}`, giving
+
+    COREJ_* environment  >  -D system property  >  the bundle's own directory
+
+— the table's precedence, but resolving against the bundle rather than against wherever you
+happened to be standing. ⚠ The `${sys:…}` level is not cosmetic: the launcher applies
+`[properties]` with an unconditional `System.setProperty`, so a two-level form would *overwrite*
+a `-D` the operator passed and silently fall back to the bundle's empty directory. The three
+directories ship empty, each with a README saying what goes in it:
+
+```bash
+unzip cumba-oss-corej-rules-<version>.zip
+mv cumba-oss-corej-rules-<version>/rules/* cumba-oss-corej-cli-<version>/rules/
+```
+
+⚠ Move the **contents**. The corpus archive has its own top-level directory, so unzipping it
+*into* the bundle's `rules/` buries the JSON two levels too deep and the engine finds nothing.
 
 ### CDISC Library access
 
