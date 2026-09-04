@@ -2127,10 +2127,10 @@ public final class CdiscValidate
         @Option(names =
         {
                 "-pc", "--pickle-cache"
-        }, description = "Python pickle metadata cache dir (offline; e.g. "
-                + "/data/cdisc.metadata.library-cache-pkl). Overrides CDISC_PICKLE_CACHE_DIR / "
-                + "cdisc.pickle.cache.dir. SDTM/SDTMIG/SENDIG only; when set and it carries the "
-                + "standard+version, the CDISC Library API is not contacted.")
+        }, description = "Python pickle metadata cache dir (offline). Overrides "
+                + "CDISC_PICKLE_CACHE_DIR / cdisc.pickle.cache.dir. SDTM/SDTMIG/SENDIG only; "
+                + "when set and it carries the standard+version, the CDISC Library API is not "
+                + "contacted.")
         @Nullable
         String pickleCache;
 
