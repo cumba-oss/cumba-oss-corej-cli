@@ -1868,6 +1868,20 @@ public final class CdiscValidate
                 "  -r,  --rules <CORE-id>           include only matching rule ids (repeatable)");
         out.println("  -er, --exclude-rules <CORE-id>   exclude matching rule ids (repeatable)");
         out.println(
+                "  -sl, --severity-level <level>    weakest check level evaluated: Reject, Error,");
+        out.println(
+                "                                   Warning (default) or Info. Levels below it are");
+        out.println(
+                "                                   not evaluated; a rule with no level at or above");
+        out.println("                                   it is SKIPPED, with that reason stated.");
+        out.println(
+                "  -me, --max-errors-per-rule <n>   findings materialised per rule, per dataset");
+        out.println(
+                "                                   (default 1000, from -Dcorej.maxErrorsPerRule");
+        out.println(
+                "                                   then MAX_ERRORS_PER_RULE; <= 0 = unlimited).");
+        out.println("                                   Extra violations are counted, not listed.");
+        out.println(
                 "  -ds, --dataset <name>[,<name>..] validate only these library members (others");
         out.println(
                 "                                   become lazy references; repeatable, comma-sep)");
@@ -1882,8 +1896,9 @@ public final class CdiscValidate
         out.println("  -ca, --cache <dir>               cache dir for CDISC Library API");
         out.println(
                 "  -pc, --pickle-cache <dir>        Python pickle metadata cache dir (offline;");
-        out.println("                                   SDTM only; skips the API when it has the");
-        out.println("                                   standard+version)");
+        out.println(
+                "                                   SDTM/SEND and ADaM runs; skips the API when it");
+        out.println("                                   carries the run's metadata products)");
         out.println();
         out.println("Cache seeding (no API key required; runs standalone and exits):");
         out.println("       --seed-cache [<repoUri>]    fill the CDISC Library web-api cache from");
@@ -1977,8 +1992,8 @@ public final class CdiscValidate
                 description = "Ordered CDISC Library products consulted for metadata, highest "
                         + "precedence first (e.g. adam/adamig-1-3,adam/adam-occds-1-1). A bare "
                         + "product id is accepted when unambiguous. Selects METADATA only - rules "
-                        + "are still selected by --standard/--version. Default: the single "
-                        + "product implied by --standard/--version.")
+                        + "are selected by -rp / --rules-package. Default: the standards the "
+                        + "selected rule packages declare.")
         List<String> metadataProducts = new ArrayList<>();
 
         @Option(names =
@@ -2128,9 +2143,10 @@ public final class CdiscValidate
         {
                 "-pc", "--pickle-cache"
         }, description = "Python pickle metadata cache dir (offline). Overrides "
-                + "CDISC_PICKLE_CACHE_DIR / cdisc.pickle.cache.dir. SDTM/SDTMIG/SENDIG only; "
-                + "when set and it carries the standard+version, the CDISC Library API is not "
-                + "contacted.")
+                + "CDISC_PICKLE_CACHE_DIR / cdisc.pickle.cache.dir. Serves SDTM-family "
+                + "(SDTMIG/SENDIG) and ADaM-family (ADaMIG, and a declared TIG ADaM leg) runs; "
+                + "when set and it carries the run's metadata products, the CDISC Library API is "
+                + "not contacted.")
         @Nullable
         String pickleCache;
 
@@ -2199,14 +2215,14 @@ public final class CdiscValidate
          * Per-rule findings cap (per dataset). Accepts a plain integer; for Python-CLI
          * compatibility a tuple form like {@code "(1000, True)"} is tolerated — the leading integer
          * is used. {@code <= 0} means unlimited. Null follows the engine default
-         * ({@code MAX_ERRORS_PER_RULE} / {@code corej.maxErrorsPerRule}, default 1000).
+         * ({@code -Dcorej.maxErrorsPerRule}, then {@code MAX_ERRORS_PER_RULE}, then 1000).
          */
         @Option(names =
         {
                 "-me", "--max-errors-per-rule"
         }, description = "Max findings to materialise per rule (per dataset); extra violations are "
-                + "counted but not listed. Default follows MAX_ERRORS_PER_RULE / "
-                + "corej.maxErrorsPerRule (1000); <= 0 = unlimited.")
+                + "counted but not listed. Default follows -Dcorej.maxErrorsPerRule, then "
+                + "MAX_ERRORS_PER_RULE, then 1000; <= 0 = unlimited.")
         @Nullable
         String maxErrorsRaw;
 
