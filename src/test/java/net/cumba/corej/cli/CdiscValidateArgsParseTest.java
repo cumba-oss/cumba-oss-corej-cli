@@ -417,4 +417,51 @@ class CdiscValidateArgsParseTest
                 stringField(parse("-d", "/tmp", "-pc", "/cache/dir2"), "pickleCache"));
     }
 
+
+    /**
+     * F-cli-03. Tightening {@code --max-errors-per-rule} from {@code find()} to {@code matches()}
+     * must not lose the documented Python-CLI tuple form, which is the reason the regex was ever a
+     * search rather than a full match.
+     */
+    @org.junit.jupiter.api.Test
+    void maxErrorsPerRule_acceptsAPlainIntegerAndThePythonTupleForm() throws Exception
+    {
+        assertEquals(Integer.valueOf(5), maxErrorsPerRule(parse("-d", "/tmp", "-me", "5")));
+        assertEquals(Integer.valueOf(5), maxErrorsPerRule(parse("-d", "/tmp", "-me", "(5, True)")));
+        assertEquals(Integer.valueOf(5),
+                maxErrorsPerRule(parse("-d", "/tmp", "-me", " (5,False) ")));
+        assertEquals(Integer.valueOf(0), maxErrorsPerRule(parse("-d", "/tmp", "-me", "0")));
+    }
+
+
+    /**
+     * C2-06. {@code ^\(?…\)?$} made each paren <b>independently</b> optional, so {@code "(5"},
+     * {@code "5)"} and {@code "(5, True"} were all read as the cap 5, and the tuple's second
+     * element was {@code [A-Za-z]+}, which accepts {@code "(5, banana)"}. Half a tuple is a typo,
+     * and the cap decides how many findings per rule are materialised — a result change.
+     */
+    @org.junit.jupiter.api.Test
+    void maxErrorsPerRule_halfATupleOrANonBooleanFlagIsAUsageError()
+    {
+        for (String bad : java.util.List.of("(5", "5)", "(5, True", "5, True)", "(5, banana)",
+                "(5 5)"))
+        {
+            Exception thrown = org.junit.jupiter.api.Assertions.assertThrows(Exception.class,
+                    () -> parse("-d", "/tmp", "-me", bad), "accepted as a cap: " + bad);
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    String.valueOf(thrown.getMessage()).contains("--max-errors-per-rule")
+                            || String.valueOf(thrown.getCause()).contains("--max-errors-per-rule"),
+                    () -> "not reported as a --max-errors-per-rule usage error: " + bad + " -> "
+                            + thrown);
+        }
+    }
+
+
+    private static Integer maxErrorsPerRule(Object parsedArgs) throws Exception
+    {
+        var f = parsedArgs.getClass().getDeclaredField("maxErrorsPerRule");
+        f.setAccessible(true);
+        return (Integer) f.get(parsedArgs);
+    }
+
 }

@@ -29,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
  * involved.
  * </p>
  */
+@org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateSeedCacheTest
 {
 
@@ -71,7 +72,7 @@ class CdiscValidateSeedCacheTest
         try (PrintStream o = new PrintStream(out, true, StandardCharsets.UTF_8);
                 PrintStream e = new PrintStream(err, true, StandardCharsets.UTF_8))
         {
-            code = CdiscValidate.run(aArgs, o, e);
+            code = OfflineCli.run(aArgs, o, e);
         }
         return new Run(code, out.toString(StandardCharsets.UTF_8),
                 err.toString(StandardCharsets.UTF_8));
@@ -111,6 +112,9 @@ class CdiscValidateSeedCacheTest
                 cache.toString());
 
         assertEquals(0, run.exitCode(), run.err());
+        // F-cli-05: the summary reaches the OPERATOR's stream, not only the logger. Until now a
+        // seeding step said nothing on stderr whatever it did or failed to do.
+        assertTrue(run.err().contains("Cache seeded at " + cache + ":"), run.err());
         assertTrue(Files.exists(cache.resolve("api_mdr_sdtmig_3-4%3Fexpand%3Dtrue.json.gz")));
         assertTrue(Files.exists(
                 cache.resolve("api_mdr_ct_packages_sdtmct-2024-09-27%3Fexpand%3Dtrue.json.gz")));
@@ -177,10 +181,17 @@ class CdiscValidateSeedCacheTest
         long firstModified = Files.getLastModifiedTime(entry).toMillis();
         Files.setLastModifiedTime(entry, java.nio.file.attribute.FileTime.fromMillis(0));
 
-        assertEquals(0, invoke("--seed-cache-from-dir", pkl.toString(), "-ca", cache.toString())
-                .exitCode());
+        Run reseed = invoke("--seed-cache-from-dir", pkl.toString(), "-ca", cache.toString());
+        assertEquals(0, reseed.exitCode(), reseed.err());
         assertEquals(0, Files.getLastModifiedTime(entry).toMillis(),
                 "a skip-existing run must not rewrite the entry");
+        // C2-07: the per-skip lines are a surface of their own — the loop that prints them
+        // survived every mutant because nothing asserted them. A re-seed skips everything, so
+        // this is where they are observable.
+        assertTrue(reseed.err().contains("  skipped: "), reseed.err());
+        // The skip line names the API ENDPOINT that was already cached, not the cache file name.
+        assertTrue(reseed.err().contains("  skipped: /api/mdr/sdtmig/3-4?expand=true"),
+                reseed.err());
 
         assertEquals(0, invoke("--seed-cache-from-dir", pkl.toString(), "-ca", cache.toString(),
                 "--seed-overwrite").exitCode());
@@ -188,4 +199,117 @@ class CdiscValidateSeedCacheTest
                 "--seed-overwrite must rewrite the entry");
         assertTrue(firstModified > 0);
     }
+
+
+    /**
+     * F-cli-05. A source that yields no cache entries at all used to exit <b>0</b> with an empty
+     * summary buried in JUL: a CI pipeline saw a green "seed the cache" step followed by a
+     * validation run against an empty cache. It now follows the {@code --install-dictionaries}
+     * template — summary and diagnosis on stderr, and a non-zero exit.
+     */
+    @Test
+    void aSeedThatYieldsNothingFailsAndSaysWhy(@TempDir Path root) throws Exception
+    {
+        Path empty = Files.createDirectories(root.resolve("no-pickles"));
+        Path cache = root.resolve("cache");
+
+        Run run = invoke("--seed-cache-from-dir", empty.toString(), "-ca", cache.toString());
+
+        assertEquals(1, run.exitCode(), run.err());
+        assertTrue(run.err().contains("Error: the seed source yielded no cache entries"),
+                run.err());
+        assertTrue(run.err().contains(cache.toAbsolutePath().toString()), run.err());
+    }
+
+
+    /**
+     * F-cli-05 / BT-E S-02. A dry run must be worded as a dry run on the operator's stream: the
+     * ternary that chooses the wording was previously observable only through the logger, so a
+     * mutant that made a dry run report "seeded" survived.
+     */
+    @Test
+    void aDryRunIsWordedAsADryRunOnStderr(@TempDir Path root) throws Exception
+    {
+        Path cache = root.resolve("cache");
+
+        Run run = invoke("--seed-cache-from-dir", pickleDir(root).toString(), "-ca",
+                cache.toString(), "--seed-dry-run");
+
+        assertEquals(0, run.exitCode(), run.err());
+        assertTrue(run.err().contains("Cache seeding (dry run) at " + cache + ":"), run.err());
+        assertFalse(run.err().contains("Cache seeded at "), run.err());
+    }
+
+
+    /**
+     * A pickle CT package whose id prefix is not in {@code PickleCacheSeeder.CT_NAME_PREFIXES}. The
+     * seeder synthesises the display name from the raw prefix, <b>writes the entry anyway</b> and
+     * records a warning — the "seeded, but not fully" case.
+     */
+    private static void addCtPackageWithAnUnknownPrefix(Path aPickleDir) throws IOException
+    {
+        Map<String, Object> ct = new LinkedHashMap<>();
+        ct.put("package", "zzct-2024-09-27");
+        ct.put("codelists", List.of());
+        Files.write(aPickleDir.resolve("zzct-2024-09-27.pkl"), new Pickler().dumps(ct));
+    }
+
+
+    /**
+     * C2-02 / F-cli-05, RULED 2026-09-08: <i>"If the seeding was not fully successful (partially is
+     * also not fully successful) then fail."</i>
+     *
+     * <p>
+     * A warning means the entry reached the cache with a <b>synthesised name or omitted fields</b>
+     * — seeded, but not as published. The exit code shipped in round 1 without a single test on its
+     * triggering branch ({@code seedCache:885-886} were both NO_COVERAGE), so this is the case that
+     * makes the ruling observable: the entry IS written, the run still fails, and the warning is on
+     * the operator's stream rather than buried in JUL.
+     * </p>
+     */
+    @Test
+    void aSeedThatWarnsFailsEvenThoughTheEntryWasWritten(@TempDir Path root) throws Exception
+    {
+        Path pkl = pickleDir(root);
+        addCtPackageWithAnUnknownPrefix(pkl);
+        Path cache = root.resolve("cache");
+
+        Run run = invoke("--seed-cache-from-dir", pkl.toString(), "-ca", cache.toString());
+
+        assertEquals(1, run.exitCode(), run.err());
+        assertTrue(run.err().contains("  warning: "), run.err());
+        assertTrue(run.err().contains("unknown CT prefix"), run.err());
+        // Not a "nothing was seeded" failure: the run wrote entries, including the warned one.
+        assertFalse(run.err().contains("yielded no cache entries"), run.err());
+        assertTrue(
+                Files.exists(cache
+                        .resolve("api_mdr_ct_packages_zzct-2024-09-27%3Fexpand%3Dtrue.json.gz")),
+                "the warned entry is written — that is what makes this PARTIAL rather than failed");
+    }
+
+
+    /**
+     * C2-02, the boundaries the warning rule must not swallow: a run that writes nothing because
+     * everything is already cached, and a dry run. Both do exactly what was asked, so both stay 0.
+     * Without these, "seed → exit 1" could be met by failing far too much.
+     */
+    @Test
+    void aReSeedThatSkipsEverythingAndADryRunBothStayZero(@TempDir Path root) throws Exception
+    {
+        Path pkl = pickleDir(root);
+        Path cache = root.resolve("cache");
+        assertEquals(0, invoke("--seed-cache-from-dir", pkl.toString(), "-ca", cache.toString())
+                .exitCode());
+
+        Run reseed = invoke("--seed-cache-from-dir", pkl.toString(), "-ca", cache.toString());
+        assertEquals(0, reseed.exitCode(), reseed.err());
+        assertTrue(reseed.err().contains("  skipped: "), reseed.err());
+        assertFalse(reseed.err().contains("  warning: "), reseed.err());
+
+        Run dry = invoke("--seed-cache-from-dir", pkl.toString(), "-ca",
+                root.resolve("other").toString(), "--seed-dry-run");
+        assertEquals(0, dry.exitCode(), dry.err());
+        assertFalse(dry.err().contains("  warning: "), dry.err());
+    }
+
 }

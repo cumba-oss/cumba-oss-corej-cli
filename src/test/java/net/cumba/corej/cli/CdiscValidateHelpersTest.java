@@ -2,7 +2,9 @@ package net.cumba.corej.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Method;
@@ -29,6 +31,9 @@ import org.junit.jupiter.api.Test;
  * </p>
  */
 @SuppressWarnings("unchecked")
+// Two cases here drive CdiscValidate.run(...) for real; the CLI's own defaults are CWD-relative,
+// so this class needs the same working-directory guard as every other end-to-end class.
+@org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateHelpersTest
 {
 
@@ -527,5 +532,282 @@ class CdiscValidateHelpersTest
         Method m = argsCls.getDeclaredMethod("optionName", String.class);
         m.setAccessible(true);
         return (String) m.invoke(null, token);
+    }
+
+    // ------------------------------------------------------------------
+    // resolveDefineSubmissionFolder (F-cli-04)
+    // ------------------------------------------------------------------
+
+
+    /**
+     * The {@code Requires: folder} submission folder. ⚑ The third case is the fix: a {@code -d}
+     * that resolves to nothing used to yield {@code dataPath.getParent()} — so {@code -d
+     * study/dta}, a typo for {@code study/data}, handed {@code study/} to the folder rules and the
+     * report described a directory the user never named. It now falls through to {@code null},
+     * which is the documented default (the define.xml's own parent). {@code run()} rejects a
+     * non-existent {@code -d} before this is reached; this is the second line of that defence.
+     */
+    @Test
+    void resolveDefineSubmissionFolder_onlyEverNamesAFolderTheUserGave(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp)
+        throws Exception
+    {
+        java.nio.file.Path dataDir = java.nio.file.Files.createDirectory(tmp.resolve("data"));
+        java.nio.file.Path dataFile = java.nio.file.Files.writeString(dataDir.resolve("dm.csv"),
+                "USUBJID\n");
+
+        assertNull(resolveDefineSubmissionFolder(null), "no -d: the engine default applies");
+        assertNull(resolveDefineSubmissionFolder("https://host/study"), "a URI has no folder");
+        assertEquals(dataDir.toAbsolutePath(), resolveDefineSubmissionFolder(dataDir.toString()),
+                "a directory is the submission folder");
+        assertEquals(dataDir.toAbsolutePath(), resolveDefineSubmissionFolder(dataFile.toString()),
+                "a single file contributes its parent");
+        assertNull(resolveDefineSubmissionFolder(tmp.resolve("dta").toString()),
+                "a path that resolves to nothing must NOT invent its parent as a submission "
+                        + "folder — that reported findings against a sibling directory");
+    }
+
+
+    private static java.nio.file.@org.jspecify.annotations.Nullable Path resolveDefineSubmissionFolder(
+            @org.jspecify.annotations.Nullable String data)
+        throws Exception
+    {
+        CdiscValidate.Args a = new CdiscValidate.Args();
+        a.data = data;
+        Method m = CdiscValidate.class.getDeclaredMethod("resolveDefineSubmissionFolder",
+                CdiscValidate.Args.class);
+        m.setAccessible(true);
+        return (java.nio.file.Path) m.invoke(null, a);
+    }
+
+    // ------------------------------------------------------------------
+    // printLibraryBasis (F-cli-06 / C2-04)
+    // ------------------------------------------------------------------
+
+
+    /**
+     * A provider whose every lookup fails, built on the same package-private {@code ProductSource}
+     * seam {@code CdiscLibraryBackedLibraryProviderTest} uses — no network, no API key.
+     */
+    private static CdiscLibraryBackedLibraryProvider degradedProvider()
+    {
+        CdiscLibraryBackedLibraryProvider provider = new CdiscLibraryBackedLibraryProvider(
+                new CdiscLibraryBackedLibraryProvider.ProductSource()
+                {
+
+                    @Override
+                    public net.cumba.cdisc.library.api.model.sdtm.@org.jspecify.annotations.Nullable SdtmProduct fetch(
+                            String aProductId, String aVersion)
+                        throws java.io.IOException
+                    {
+                        throw new java.io.IOException("offline");
+                    }
+
+
+                    @Override
+                    public net.cumba.cdisc.library.api.model.products.@org.jspecify.annotations.Nullable Products catalog()
+                        throws java.io.IOException
+                    {
+                        throw new java.io.IOException("offline");
+                    }
+                });
+        provider.datasetLabel("SDTMIG", "3.4", "DM");
+        provider.datasetLabel("SENDIG", "3.1", "DM");
+        return provider;
+    }
+
+
+    private static String printLibraryBasis(CdiscLibraryBackedLibraryProvider aProvider)
+    {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (java.io.PrintStream err = new java.io.PrintStream(buffer, true,
+                java.nio.charset.StandardCharsets.UTF_8))
+        {
+            CdiscValidate.printLibraryBasis(aProvider, err);
+        }
+        return buffer.toString(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+
+    /**
+     * C2-04. F-cli-06's CLI half shipped with no test at all: the guard survived and the
+     * {@code println} was NO_COVERAGE, so the line a clinical user relies on to learn that their
+     * Define-XML report under-reports could have been deleted outright with the suite still green.
+     * This pins the wording, the count and the named keys.
+     */
+    @Test
+    void printLibraryBasis_namesEveryFailedLookupAndSaysTheReportUnderReports()
+    {
+        String err = printLibraryBasis(degradedProvider());
+
+        assertTrue(err.startsWith("Library basis: 2 CDISC Library lookup(s) failed ("), err);
+        assertTrue(err.contains("sdtmig|3-4"), err);
+        assertTrue(err.contains("sendig|3-1"), err);
+        assertTrue(err.contains("the library-gated Define-XML rules could not fire for them, so "
+                + "this report under-reports."), err);
+        assertEquals(1, err.lines().count(), err);
+    }
+
+
+    /** The other half of the guard: a run that lost nothing must not claim it did. */
+    @Test
+    void printLibraryBasis_saysNothingWhenNoLookupFailed()
+    {
+        assertEquals("", printLibraryBasis(null),
+                "no API key was configured, so no lookup was ever attempted");
+
+        CdiscLibraryBackedLibraryProvider healthy = new CdiscLibraryBackedLibraryProvider(
+                new CdiscLibraryBackedLibraryProvider.ProductSource()
+                {
+
+                    @Override
+                    public net.cumba.cdisc.library.api.model.sdtm.@org.jspecify.annotations.Nullable SdtmProduct fetch(
+                            String aProductId, String aVersion)
+                    {
+                        return null;
+                    }
+
+
+                    @Override
+                    public net.cumba.cdisc.library.api.model.products.@org.jspecify.annotations.Nullable Products catalog()
+                    {
+                        return null;
+                    }
+                });
+        healthy.datasetLabel("SDTMIG", "3.4", "DM");
+        assertEquals("", printLibraryBasis(healthy),
+                "an answered-but-empty lookup is not a degradation");
+    }
+
+
+    /**
+     * The production download wiring, asserted without making a request: {@code httpDownloads()}
+     * builds a source for each credential-free type and refuses the rest. Without this the seam's
+     * production binding would be reachable only from {@code main}, i.e. from nothing the suite
+     * runs — the seam would have moved the coverage gap rather than closed it.
+     */
+    @Test
+    void httpDownloads_buildsASourceForEachCredentialFreeTypeAndRefusesTheOthers() throws Exception
+    {
+        CdiscValidate.DictionaryDownloads downloads = CdiscValidate.httpDownloads();
+        for (String type : List.of("medrt", "unii", "neoplasm"))
+        {
+            assertNotNull(downloads.forType(type), type + " is downloadable without credentials");
+        }
+        for (String type : List.of("meddra", "whodrug", "loinc", "snomed"))
+        {
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> downloads.forType(type), type + " needs a licence or an account");
+            assertTrue(String.valueOf(ex.getMessage()).contains(type),
+                    "the refusal names the type: " + ex.getMessage());
+        }
+    }
+
+
+    /**
+     * The production pickle-archive wiring, asserted without fetching: {@code httpArchives()}
+     * builds an {@code HttpArchivePickleSource} over the repo coordinates it is handed. Same reason
+     * as above — without this the production binding is reachable only from {@code main}.
+     */
+    @Test
+    void httpArchives_buildsAnHttpSourceOverTheGivenRepo() throws Exception
+    {
+        try (net.cumba.corej.core.metadata.pickle.PickleSource source = CdiscValidate.httpArchives()
+                .forRepo("https://example.org/repo.git", null, "resources/cache", null, null))
+        {
+            assertNotNull(source, "the production seam yields a source");
+            assertTrue(
+                    source instanceof net.cumba.corej.core.metadata.pickle.HttpArchivePickleSource,
+                    "and it is the HTTP one: " + source.getClass().getName());
+        }
+    }
+
+
+    /**
+     * ⭐ <b>The shipped binary's exit-code contract.</b> {@code main} is
+     * {@code System.exit(run(args, System.out, System.err))}, so whatever that three-argument
+     * overload returns <em>is</em> the process exit status — and it must be the code the run
+     * produced, never a constant.
+     *
+     * <p>
+     * ⚠ Why a NON-zero code, and why here. After the offline sweep every one of the 58 end-to-end
+     * call sites goes through {@code OfflineCli} and therefore through the six-argument overload;
+     * the only case left touching the three-argument one asserted {@code 0} for {@code -h}, which
+     * is the value the mutant returns. Rewriting the delegation as {@code run(…); return 0;} was
+     * therefore green across the whole suite while making {@code --totally-bogus} exit 0 instead of
+     * 2, a failed {@code --install-dictionaries} exit 0 instead of 1, and a missing {@code -d}
+     * directory exit 0 instead of 2 — every failure mode of the CLI reported as success to the
+     * shell that called it.
+     * </p>
+     *
+     * <p>
+     * A usage error is the cheapest non-zero code that reaches this line: {@code Args.parse}
+     * rejects the unknown option and returns 2 before any of the three production seams is read, so
+     * the case stays offline and instantaneous.
+     * </p>
+     */
+    @Test
+    void run_threeArgOverload_propagatesANonZeroExitCode() throws Exception
+    {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        java.io.ByteArrayOutputStream err = new java.io.ByteArrayOutputStream();
+        int rc = CdiscValidate.run(new String[]
+        {
+                "--totally-bogus"
+        }, new java.io.PrintStream(out, true, java.nio.charset.StandardCharsets.UTF_8),
+                new java.io.PrintStream(err, true, java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(2, rc,
+                "an unrecognised option is a usage error and the process must exit 2, not 0");
+        assertTrue(
+                err.toString(java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("Usage: CdiscValidate [options]"),
+                "and the usage banner goes to stderr for a usage error");
+    }
+
+
+    /**
+     * The same overload carries {@code -h} through to the usage banner on <em>out</em> and rc 0.
+     *
+     * <p>
+     * ⚠ Renamed from {@code run_threeArgOverload_delegatesToTheProductionSeams}, which is not what
+     * it pins: {@code -h} returns from the six-argument overload before {@code downloads},
+     * {@code library} or {@code archives} is ever read, so substituting a test double for any of
+     * the three at the delegation site leaves this test green. The production seams are asserted
+     * where they can actually be observed —
+     * {@link #httpArchives_buildsAnHttpSourceOverTheGivenRepo} and
+     * {@link #configuredLibrary_withoutAnApiKey_yieldsNoProvider} pin the factories themselves, and
+     * no offline test can distinguish which instance the delegation passed.
+     * </p>
+     */
+    @Test
+    void run_threeArgOverload_helpPrintsTheUsageBannerAndExitsZero() throws Exception
+    {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        java.io.ByteArrayOutputStream err = new java.io.ByteArrayOutputStream();
+        int rc = CdiscValidate.run(new String[]
+        {
+                "-h"
+        }, new java.io.PrintStream(out, true, java.nio.charset.StandardCharsets.UTF_8),
+                new java.io.PrintStream(err, true, java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(0, rc, "--help exits 0");
+        assertTrue(
+                out.toString(java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("Usage: CdiscValidate [options]"),
+                "the usage banner is written to the out stream");
+    }
+
+
+    /**
+     * With no API key configured the production {@link CdiscValidate.LibraryAccess} yields none.
+     */
+    @Test
+    void configuredLibrary_withoutAnApiKey_yieldsNoProvider()
+    {
+        String apiKey = net.cumba.cdisc.library.api.client.CdiscLibraryClient.getApiKey();
+        org.junit.jupiter.api.Assumptions.assumeTrue(apiKey == null || apiKey.isBlank(),
+                "this machine has a CDISC Library API key configured, so the no-key branch "
+                        + "cannot be exercised here");
+        assertNull(CdiscValidate.configuredLibrary().provider(null),
+                "no API key means no provider and no lookup");
     }
 }

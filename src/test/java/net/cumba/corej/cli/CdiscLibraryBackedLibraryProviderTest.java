@@ -215,6 +215,76 @@ class CdiscLibraryBackedLibraryProviderTest
         assertEquals(1, fetches.get(), "the failed product is cached, not re-fetched");
         assertTrue(provider.datasetLabel("SDTMIG", "3.5", "DM").isEmpty());
         assertEquals(2, fetches.get(), "a different version is its own cache entry");
+
+        // F-cli-06: every swallowed failure is NAMED, not merely logged. Without this the only
+        // trace of a Library outage was a JUL WARNING, and the written .define.json from a fully
+        // degraded run was byte-indistinguishable from one where every library-gated rule passed.
+        // Asserting the keys is what kills "removed call to warnOnce" on both catch sites.
+        assertEquals(List.of("products-catalog", "sdtmig|3-4", "sdtmig|3-5"),
+                provider.degradedLookups(),
+                "each failed lookup key is reported once, product fetches and the catalog alike");
+    }
+
+
+    /**
+     * C2-05. The ordering of {@link CdiscLibraryBackedLibraryProvider#degradedLookups()} is
+     * <b>lexicographic</b>, not insertion order — that is the whole reason {@code warned} is backed
+     * by a {@code ConcurrentSkipListMap}, since lookups run concurrently across rules and insertion
+     * order is whatever the scheduler produced.
+     *
+     * <p>
+     * ⚠ Measured 2026-09-08: swapping the backing map for {@code ConcurrentHashMap.newKeySet()}
+     * left {@code failingLookupsAnswerEmptyAndAreAttemptedOncePerProduct} GREEN — with three keys
+     * the hash iteration order happened to be sorted, so the ordering claim was not actually pinned
+     * by anything. Twelve keys failed in reverse order make the two orders disagree, so this case
+     * fails for either replacement the javadoc warns about (an unordered hash set, or a
+     * {@code LinkedHashSet} restoring insertion order).
+     * </p>
+     */
+    @Test
+    void degradedLookupsAreLexicographic_whateverOrderTheLookupsFailedIn()
+    {
+        CdiscLibraryBackedLibraryProvider provider = new CdiscLibraryBackedLibraryProvider(
+                new CdiscLibraryBackedLibraryProvider.ProductSource()
+                {
+
+                    @Override
+                    public @Nullable SdtmProduct fetch(String aProductId, String aVersion)
+                        throws IOException
+                    {
+                        throw new IOException("offline");
+                    }
+
+
+                    @Override
+                    public @Nullable Products catalog() throws IOException
+                    {
+                        throw new IOException("offline");
+                    }
+                });
+
+        List<String> expected = new java.util.ArrayList<>();
+        for (int minor = 12; minor >= 1; minor--)
+        {
+            provider.datasetLabel("SDTMIG", "3." + minor, "DM");
+            expected.add("sdtmig|3-" + minor);
+        }
+        java.util.Collections.sort(expected);
+
+        assertEquals(expected, provider.degradedLookups(),
+                "degradedLookups() is sorted, not insertion-ordered: the lookups above failed in "
+                        + "descending order and the list must still come back ascending");
+    }
+
+
+    @Test
+    void aProviderThatAnsweredEverythingReportsNoDegradation()
+    {
+        CdiscLibraryBackedLibraryProvider provider = provider();
+        assertEquals(Optional.of("Demographics"), provider.datasetLabel("SDTMIG", "3.4", "DM"));
+        assertEquals(List.of(), provider.degradedLookups(),
+                "a healthy run must not claim degradation — the CLI prints the Library basis "
+                        + "line only when this list is non-empty");
     }
 
 }

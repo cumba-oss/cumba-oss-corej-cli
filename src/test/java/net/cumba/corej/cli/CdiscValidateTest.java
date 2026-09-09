@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -24,6 +25,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  */
 // Reflective bridge in test infrastructure; RuntimeException is the correct wrapping.
 @SuppressWarnings("RethrowReflectiveOperationExceptionAsLinkageError")
+@org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateTest
 {
 
@@ -34,7 +36,7 @@ class CdiscValidateTest
     void run_help_short_printsUsageToStdout() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-h"
         }, cap.out, cap.err);
@@ -48,7 +50,7 @@ class CdiscValidateTest
     void run_help_long_printsUsageToStdout() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--help"
         }, cap.out, cap.err);
@@ -62,7 +64,7 @@ class CdiscValidateTest
     void run_unknownOption_returns2_writesError() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--totally-bogus"
         }, cap.out, cap.err);
@@ -78,7 +80,7 @@ class CdiscValidateTest
         Captured cap = capture();
         // ⚑ --standard used to be the sample flag here; it is removed, so the subject (a live
         // flag given no value) needs a live flag. --data still takes one.
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--data"
         }, cap.out, cap.err);
@@ -92,7 +94,7 @@ class CdiscValidateTest
     void run_threadsNotNumeric_returns2() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-t", "abc", "-d", "/tmp"
         }, cap.out, cap.err);
@@ -106,7 +108,7 @@ class CdiscValidateTest
     void run_threadsZero_returns2() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-t", "0", "-d", "/tmp"
         }, cap.out, cap.err);
@@ -125,7 +127,7 @@ class CdiscValidateTest
     void run_removedStandardFlag_returns2() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-s", "sdtmig", "-d", "/tmp"
         }, cap.out, cap.err);
@@ -139,7 +141,7 @@ class CdiscValidateTest
     void run_missingDataAndDefineXml_returns2() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[] {}, cap.out, cap.err);
+        int rc = OfflineCli.run(new String[] {}, cap.out, cap.err);
 
         assertEquals(2, rc);
         assertTrue(cap.errAsString().contains("--data") || cap.errAsString().contains("required"));
@@ -150,7 +152,7 @@ class CdiscValidateTest
     void run_unsupportedOutputFormat_returns2() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", "/tmp", "-of", "xml"
         }, cap.out, cap.err);
@@ -167,7 +169,7 @@ class CdiscValidateTest
         // stderr message names the replacement instead of picocli's misleading duplicated
         // --standard error from the "-s s" POSIX cluster.
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", "/tmp", "-ss", "adam"
         }, cap.out, cap.err);
@@ -182,7 +184,7 @@ class CdiscValidateTest
     void run_removedSdtmVersionOption_returns2NamingTheReplacement() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", "/tmp", "-sdtmv", "3-3"
         }, cap.out, cap.err);
@@ -197,7 +199,7 @@ class CdiscValidateTest
     void run_oldDatasetPathOption_removed_returns2() throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-dp", "/tmp/x.xpt"
         }, cap.out, cap.err);
@@ -207,16 +209,67 @@ class CdiscValidateTest
     }
 
 
+    /**
+     * F-cli-03. {@code --max-errors-per-rule} used to accept ANY string containing digits, because
+     * the parse used {@code find()} rather than {@code matches()} over {@code -?\\d+}:
+     * {@code -me v2.1} silently capped at 2. The cap decides how many findings per rule are
+     * materialised, so a typo changed the reported result with nothing said.
+     */
     @Test
-    void run_dataPathNotFound_throwsIOException()
+    void maxErrorsPerRule_aTokenThatMerelyContainsDigits_isAUsageError() throws Exception
     {
         Captured cap = capture();
-        java.io.IOException ex = org.junit.jupiter.api.Assertions
-                .assertThrows(java.io.IOException.class, () -> CdiscValidate.run(new String[]
-                {
-                        "-d", tempDir.resolve("does-not-exist").toString()
-                }, cap.out, cap.err));
-        assertTrue(ex.getMessage().contains("path not found"));
+        int rc = OfflineCli.run(new String[]
+        {
+                "-d", "/tmp", "-me", "v2.1"
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertTrue(cap.errAsString().contains("--max-errors-per-rule expects an integer"),
+                cap.errAsString());
+        assertTrue(cap.errAsString().contains("v2.1"), cap.errAsString());
+    }
+
+
+    /** F-cli-03. A negative cap has no meaning and used to be accepted from the tuple form. */
+    @Test
+    void maxErrorsPerRule_negativeCap_isAUsageError() throws Exception
+    {
+        Captured cap = capture();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-d", "/tmp", "-me", "(-3, True)"
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertTrue(cap.errAsString().contains("must not be negative"), cap.errAsString());
+    }
+
+
+    /**
+     * ⚑ Rewritten (F-cli-04). This case used to assert that a non-existent {@code -d} escapes
+     * {@code CdiscValidate.run} as an {@code IOException} — i.e. it pinned a raw stack trace out of
+     * {@code main} for a plain user typo, contradicting run()'s own comment that the data library /
+     * define.xml existence pre-checks "own the user-visible Error: … stderr text and the
+     * exit-code-2 contract that callers and tests rely on". Only {@code -dxp} had such a check. It
+     * now behaves like {@code -dxp}: one stderr line and exit 2.
+     */
+    @Test
+    void run_dataPathNotFound_isAUsageErrorNamingThePath() throws Exception
+    {
+        Path missing = tempDir.resolve("does-not-exist");
+
+        Captured cap = capture();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-d", missing.toString()
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertTrue(cap.errAsString().contains("Error: data library not found: "),
+                cap.errAsString());
+        assertTrue(cap.errAsString().contains(missing.toAbsolutePath().toString()),
+                cap.errAsString());
     }
 
 
@@ -226,7 +279,7 @@ class CdiscValidateTest
         Path bogus = tempDir.resolve("no-such-define.xml");
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-dxp", bogus.toString()
         }, cap.out, cap.err);
@@ -243,7 +296,7 @@ class CdiscValidateTest
         Path bogus = tempDir.resolve("no-define.xml");
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", source.toString(), "-dxp", bogus.toString()
         }, cap.out, cap.err);
@@ -260,7 +313,7 @@ class CdiscValidateTest
         Path runtime = tempDir.resolve("rt.csv");
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", empty.toString(), "-o", tempDir.resolve("rep.json").toString(),
                 "--runtime-report", runtime.toString(), "--rules-dir", tempDir.toString()
@@ -278,7 +331,7 @@ class CdiscValidateTest
         Path empty = makeEmptyFolder();
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", empty.toString(), "-ds", "DM", "-o", tempDir.resolve("rep.json").toString(),
                 "--rules-dir", tempDir.toString()
@@ -300,7 +353,7 @@ class CdiscValidateTest
         Path emptyRules = makeEmptyFolder();
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", source.toString(), "-o", tempDir.resolve("rep.json").toString(),
                 "--rules-dir", emptyRules.toString()
@@ -336,7 +389,7 @@ class CdiscValidateTest
         Captured cap = capture();
         try
         {
-            CdiscValidate.run(new String[]
+            OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "-o", tempDir.resolve("ar.json").toString(), "-mp",
                     "adam/adamig-1-3", "--rules-dir", rulesDir.toString()
@@ -350,6 +403,12 @@ class CdiscValidateTest
             {
                 throw ex;
             }
+            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
+            // assertions below this try never ran; returning here made JUnit record a green
+            // test that had observed nothing (and, for the two end-to-end cases, kept 27
+            // recorded mutant kills silently conditional on the CDISC Library being up).
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
         }
     }
 
@@ -377,10 +436,13 @@ class CdiscValidateTest
         Path runtime = tempDir.resolve("rep.runtime.csv");
 
         Captured cap = capture();
-        int rc;
+        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
+        // know that, and a value that would silently satisfy the assertions is the last thing
+        // this file needs.
+        int rc = Integer.MIN_VALUE;
         try
         {
-            rc = CdiscValidate.run(new String[]
+            rc = OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "-o", report.toString(), "-rp", "sdtmig-3-4", "-mp",
                     "sdtmig/3-4", "--rules-dir", rulesDir.toString()
@@ -397,7 +459,12 @@ class CdiscValidateTest
             {
                 throw ex;
             }
-            return;
+            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
+            // assertions below this try never ran; returning here made JUnit record a green
+            // test that had observed nothing (and, for the two end-to-end cases, kept 27
+            // recorded mutant kills silently conditional on the CDISC Library being up).
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
         }
 
         // Successful run: rc 0 and the report + runtime CSV are written.
@@ -430,10 +497,11 @@ class CdiscValidateTest
         writeCdiscManifest(rulesDir, rulesFile);
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", source.toString(), "-r", "CORE-NO-MATCH", "-rp", "sdtmig-3-4", "-mp",
-                "sdtmig/3-4", "--rules-dir", rulesDir.toString()
+                "sdtmig/3-4", "--rules-dir", rulesDir.toString(), "-o",
+                tempDir.resolve("include-filter.json").toString()
         }, cap.out, cap.err);
 
         assertEquals(2, rc);
@@ -451,10 +519,11 @@ class CdiscValidateTest
 
         Captured cap = capture();
         java.io.IOException ex = org.junit.jupiter.api.Assertions
-                .assertThrows(java.io.IOException.class, () -> CdiscValidate.run(new String[]
+                .assertThrows(java.io.IOException.class, () -> OfflineCli.run(new String[]
                 {
                         "-d", source.toString(), "-rd", tempDir.resolve("nope").toString(),
-                        "--rules-dir", tempDir.toString()
+                        "--rules-dir", tempDir.toString(), "-o",
+                        tempDir.resolve("refdata.json").toString()
                 }, cap.out, cap.err));
         assertTrue(ex.getMessage().contains("path not found")
                 || ex.getMessage().contains("not found"));
@@ -481,7 +550,7 @@ class CdiscValidateTest
         // (--standard=sdtmig was the sample until Plan 2 R5 removed the flag.)
         // Help suppresses the rest of the parse: combine with -h so the test stays trivial.
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--rules-package=cdisc-sdtmig-3-4", "-h"
         }, cap.out, cap.err);
@@ -498,7 +567,7 @@ class CdiscValidateTest
         // parse still completes and the "Note: ignoring unsupported options" message lands on
         // stderr.
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--progress", "fancy", "-h"
         }, cap.out, cap.err);
@@ -519,7 +588,7 @@ class CdiscValidateTest
     void run_parseOnlyOptions_withHelp_exits0(String name, String[] args) throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(args, cap.out, cap.err);
+        int rc = OfflineCli.run(args, cap.out, cap.err);
 
         assertEquals(0, rc);
     }
@@ -566,10 +635,13 @@ class CdiscValidateTest
         writeCdiscManifest(rulesDir, rulesFile);
 
         Captured cap = capture();
-        int rc;
+        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
+        // know that, and a value that would silently satisfy the assertions is the last thing
+        // this file needs.
+        int rc = Integer.MIN_VALUE;
         try
         {
-            rc = CdiscValidate.run(new String[]
+            rc = OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "-rd", refLib.toString(), "-o",
                     tempDir.resolve("rd.json").toString(), "-rp", "sdtmig-3-4", "-mp", "sdtmig/3-4",
@@ -584,7 +656,12 @@ class CdiscValidateTest
             {
                 throw ex;
             }
-            return;
+            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
+            // assertions below this try never ran; returning here made JUnit record a green
+            // test that had observed nothing (and, for the two end-to-end cases, kept 27
+            // recorded mutant kills silently conditional on the CDISC Library being up).
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
         }
         assertEquals(0, rc);
         assertTrue(Files.exists(tempDir.resolve("rd.json")));
@@ -617,7 +694,7 @@ class CdiscValidateTest
         Captured cap = capture();
         try
         {
-            CdiscValidate.run(new String[]
+            OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "-rd", refLib.toString(), "-o",
                     tempDir.resolve("dup.json").toString(), "--rules-dir", rulesDir.toString()
@@ -631,6 +708,12 @@ class CdiscValidateTest
             {
                 throw ex;
             }
+            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
+            // assertions below this try never ran; returning here made JUnit record a green
+            // test that had observed nothing (and, for the two end-to-end cases, kept 27
+            // recorded mutant kills silently conditional on the CDISC Library being up).
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
         }
     }
 
@@ -661,7 +744,7 @@ class CdiscValidateTest
         Captured cap = capture();
         try
         {
-            CdiscValidate.run(new String[]
+            OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "-ds", "DM", "-o",
                     tempDir.resolve("ds.json").toString(), "--rules-dir", rulesDir.toString()
@@ -675,6 +758,12 @@ class CdiscValidateTest
             {
                 throw ex;
             }
+            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
+            // assertions below this try never ran; returning here made JUnit record a green
+            // test that had observed nothing (and, for the two end-to-end cases, kept 27
+            // recorded mutant kills silently conditional on the CDISC Library being up).
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
         }
     }
 
@@ -687,7 +776,7 @@ class CdiscValidateTest
         Path source = makeSourceFolderWithCsv();
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", source.toString(), "-ds", "NOSUCH", "-o",
                 tempDir.resolve("nm.json").toString(), "--rules-dir", tempDir.toString()
@@ -727,7 +816,7 @@ class CdiscValidateTest
         {
             System.setProperty("user.dir", tempDir.toString());
             // Use --runtime-report to avoid creating a runtime CSV in cwd.
-            CdiscValidate.run(new String[]
+            OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "--runtime-report",
                     tempDir.resolve("nout-rt.csv").toString(), "--rules-dir", rulesDir.toString()
@@ -741,6 +830,12 @@ class CdiscValidateTest
             {
                 throw ex;
             }
+            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
+            // assertions below this try never ran; returning here made JUnit record a green
+            // test that had observed nothing (and, for the two end-to-end cases, kept 27
+            // recorded mutant kills silently conditional on the CDISC Library being up).
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
         }
         finally
         {
@@ -769,12 +864,16 @@ class CdiscValidateTest
     @Test
     void run_emptyDataString_throwsIOException()
     {
-        // -d "" → resolveLibrary throws "library path is empty".
+        // -d "" → resolveLibrary throws "library path is empty". The blank value is deliberately
+        // NOT caught by run()'s -d existence pre-check: Path.of("") is the CWD and does exist, so
+        // the precise message stays resolveLibrary's. -o is named so the run's runtime CSV lands
+        // under @TempDir; without it the CWD-relative default stem is used and the file is left
+        // in the working directory (see WorkingDirectoryStaysCleanExtension).
         Captured cap = capture();
         java.io.IOException ex = org.junit.jupiter.api.Assertions
-                .assertThrows(java.io.IOException.class, () -> CdiscValidate.run(new String[]
+                .assertThrows(java.io.IOException.class, () -> OfflineCli.run(new String[]
                 {
-                        "-d", ""
+                        "-d", "", "-o", tempDir.resolve("blank.json").toString()
                 }, cap.out, cap.err));
         assertTrue(ex.getMessage().contains("empty"));
     }
@@ -790,7 +889,7 @@ class CdiscValidateTest
         String uri = source.toUri().toString();
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", uri, "-o", tempDir.resolve("uri.json").toString(), "--rules-dir",
                 tempDir.toString()
@@ -826,10 +925,13 @@ class CdiscValidateTest
         Path report = tempDir.resolve("rf.json");
 
         Captured cap = capture();
-        int rc;
+        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
+        // know that, and a value that would silently satisfy the assertions is the last thing
+        // this file needs.
+        int rc = Integer.MIN_VALUE;
         try
         {
-            rc = CdiscValidate.run(new String[]
+            rc = OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "--rules-file", rulesFile.toString(), "-mp",
                     "sdtmig/3-4", "-o", report.toString(), "--rules-dir", tempDir.toString()
@@ -844,7 +946,12 @@ class CdiscValidateTest
             {
                 throw ex;
             }
-            return;
+            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
+            // assertions below this try never ran; returning here made JUnit record a green
+            // test that had observed nothing (and, for the two end-to-end cases, kept 27
+            // recorded mutant kills silently conditional on the CDISC Library being up).
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
         }
 
         // The explicit file's rule ran: rc 0 (USUBJID exists in the fixture) and the report
@@ -865,7 +972,7 @@ class CdiscValidateTest
         Files.writeString(rulesFile, "{\"rules\":{}}");
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", source.toString(), "--rules-file", rulesFile.toString(), "-o",
                 tempDir.resolve("only.json").toString(), "--rules-dir", tempDir.toString()
@@ -889,7 +996,7 @@ class CdiscValidateTest
         Path source = makeSourceFolderWithCsv();
 
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", source.toString(), "--rules-file",
                 tempDir.resolve("not-there.json").toString(), "-mp", "sdtmig/3-4", "-o",
@@ -913,7 +1020,7 @@ class CdiscValidateTest
         // -p / --progress accepts a value; the parser must consume both the flag and its value
         // so subsequent options parse normally. -rr / --raw-report is a flag (no value).
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--progress", "fancy", "--raw-report", "-h"
         }, cap.out, cap.err);
@@ -936,7 +1043,7 @@ class CdiscValidateTest
     void run_flagWithValue_parses(String flag, String value) throws Exception
     {
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 flag, value, "-h"
         }, cap.out, cap.err);
@@ -951,7 +1058,7 @@ class CdiscValidateTest
         // network call.
         Path cacheDir = Files.createDirectory(tempDir.resolve("cache-" + System.nanoTime()));
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-ca", cacheDir.toString(), "-h"
         }, cap.out, cap.err);
@@ -990,7 +1097,7 @@ class CdiscValidateTest
         // --raw-report and --custom-standard are tagged as flags (no value). The isFlag()
         // branch in the ignored-options switch fires for them.
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--raw-report", "--custom-standard", "-h"
         }, cap.out, cap.err);
@@ -1004,7 +1111,7 @@ class CdiscValidateTest
         // -e / --encoding takes a value; passing it last with no following token still works
         // — the parser only consumes the value when there is one available.
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-e", "UTF-8", "-h"
         }, cap.out, cap.err);
@@ -1017,7 +1124,7 @@ class CdiscValidateTest
     {
         // -t=2 inline form takes the inline-value branch in the threads case.
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-t=2", "-h"
         }, cap.out, cap.err);
@@ -1038,7 +1145,7 @@ class CdiscValidateTest
         // -d with valid library and a missing -dxp → distinct error branch.
         Path source = makeSourceFolderWithCsv();
         Captured cap = capture();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", source.toString(), "-dxp", tempDir.resolve("missing-define.xml").toString()
         }, cap.out, cap.err);

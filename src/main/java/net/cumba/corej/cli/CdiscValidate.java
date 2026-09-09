@@ -234,6 +234,139 @@ public final class CdiscValidate
     /** System property overriding the precisionFDA UNII archive URL for dictionary downloads. */
     private static final String SP_UNII_ARCHIVE_URL = "corej.dictionaries.uniiArchiveUrl";
 
+    /**
+     * The dictionary <b>download</b> seam — the same shape as
+     * {@code CdiscLibraryBackedLibraryProvider.ProductSource}, and package-visible for the same
+     * reason: so a test can hand the installer a canned or a deliberately-failing source instead of
+     * letting it reach the public internet.
+     *
+     * <p>
+     * ⚠ This is not a convenience. {@code installTargetDir} ends at the CWD-relative
+     * {@code ./dictionaries} (D4's documented last tier, and the shipped bundle's layout), so a
+     * <em>single</em> flipped guard — the negated {@code if (args.installDictionaries)} in
+     * {@link #run(Args, PrintStream)} — sends an ordinary validate run down the credential-free
+     * download path. With a live {@link #httpDownloads()} that run makes real requests to NCI EVS
+     * and precisionFDA: it takes minutes, it is killed by the mutation-testing timeout mid-write,
+     * and its half-written store becomes the next JVM's ambient state. Behind this seam the same
+     * mutant completes in milliseconds and is reported honestly.
+     * </p>
+     */
+    interface DictionaryDownloads
+    {
+
+        /**
+         * @param aType
+         *            one of {@link #DOWNLOADABLE_TYPES}.
+         * @return the source to install that dictionary from.
+         * @throws IOException
+         *             if the source cannot be reached or built.
+         */
+        DictionarySource forType(String aType) throws IOException;
+    }
+
+
+    /**
+     * How a Define-XML run obtains its CDISC Library provider. Package-visible for the same reason
+     * as {@link DictionaryDownloads}: {@link #printLibraryBasis} is only reachable with a provider
+     * that has actually recorded a failed lookup, and building one used to require a configured API
+     * key plus a real Library outage. Nothing short of that could pin the <b>call site</b> — the
+     * method itself was extracted and tested (C2-04), but every covering case ran with
+     * {@code apiKey == null}, so the provider was {@code null}, {@code printLibraryBasis} returned
+     * at its first {@code if}, and deleting the call from {@link #runDefineConformance} changed no
+     * assertion (C3-02).
+     */
+    interface LibraryAccess
+    {
+
+        /**
+         * @param aCacheDir
+         *            the {@code -ca} cache directory, or {@code null} for the shared default.
+         * @return the provider for this run, or {@code null} when no Library access is configured
+         *         and no lookup will be attempted.
+         */
+        @Nullable
+        CdiscLibraryBackedLibraryProvider provider(@Nullable String aCacheDir);
+    }
+
+
+    /**
+     * Where a {@code --seed-cache} run fetches the Python engine's pickle archive from. The same
+     * seam as {@link DictionaryDownloads}, for the same reason and against the same mutant shape:
+     * negating {@code if (aArgs.seedCacheFromDir != null)} in {@link #buildPickleSource} sends a
+     * local-directory seed down the <b>archive-download</b> path, and with the production binding
+     * that mutant fetches a repository archive over HTTP — minutes per minion, killed by the
+     * mutation-testing timeout, scored {@code TIMED_OUT} with no test having observed anything.
+     */
+    interface PickleArchives
+    {
+
+        PickleSource forRepo(String aRepo, @Nullable String aRef, String aRepoPath,
+                @Nullable String aArchiveUrlTemplate, @Nullable Path aWorkDir)
+            throws IOException;
+    }
+
+    /** The download seam in force for this invocation; never {@code null}. */
+    private final DictionaryDownloads downloads;
+
+    /** The pickle-archive seam in force for this invocation; never {@code null}. */
+    private final PickleArchives archives;
+
+    /** The Library seam in force for this invocation; never {@code null}. */
+    private final LibraryAccess library;
+
+    /**
+     * The only constructor: every outbound channel this CLI has is supplied by the caller. The
+     * production bindings ({@link #httpDownloads()}, {@link #configuredLibrary()},
+     * {@link #httpArchives()}) are chosen one level up, in
+     * {@link #run(String[], PrintStream, PrintStream)}.
+     *
+     * <p>
+     * ⚠ The no-arg, one-arg and two-arg constructors this class used to carry were deleted in round
+     * 4: each existed only to fill in a production seam, none had a caller, and the no-arg one's
+     * "Production binding" javadoc described a wiring nothing performed.
+     * </p>
+     */
+    CdiscValidate(DictionaryDownloads aDownloads, LibraryAccess aLibrary, PickleArchives aArchives)
+    {
+        downloads = aDownloads;
+        library = aLibrary;
+        archives = aArchives;
+    }
+
+
+    /** The production {@link PickleArchives}: a real HTTP fetch of the repository archive. */
+    static PickleArchives httpArchives()
+    {
+        return (aRepo, aRef, aRepoPath, aTemplate, aWorkDir) -> new HttpArchivePickleSource(aRepo,
+                aRef, aRepoPath, aTemplate, aWorkDir);
+    }
+
+
+    /**
+     * The production {@link LibraryAccess}: a provider over a configured
+     * {@link CdiscLibraryClient}, or {@code null} when no API key is set.
+     */
+    static LibraryAccess configuredLibrary()
+    {
+        return aCacheDir ->
+        {
+            String apiKey = CdiscLibraryClient.getApiKey();
+            if (apiKey == null || apiKey.isBlank())
+            {
+                return null;
+            }
+            CdiscLibraryClient.CdiscBuilder client = CdiscLibraryClient.builder();
+            // Same cache resolution as the metadata-enrichment path (CoreLibraryAccessImpl):
+            // -ca dir in the Gzip format that path writes, else the shared default cache
+            // (~/.cdiscApiCache) rather than the builder's no-op fallback.
+            client.cache(aCacheDir != null
+                    ? new GzipFileApiCache(Path.of(aCacheDir).toAbsolutePath(), ".json")
+                    : CdiscLibraryClient.getCache());
+            return CdiscLibraryBackedLibraryProvider.over(client.build());
+        };
+    }
+
+
     public static void main(String[] args) throws Exception
     {
         // The dataviewer's net.cumba.license.LicenseGate call was stripped on copy — Apache 2.0
@@ -260,10 +393,36 @@ public final class CdiscValidate
 
 
     /**
-     * Entry point for tests. Same behaviour as {@link #main(String[])} but writes to the supplied
-     * streams and returns a process exit code instead of calling {@link System#exit(int)}.
+     * <b>The binding {@link #main(String[])} uses</b>, and the shipped binary's exit-code contract:
+     * same behaviour as {@code main} but writing to the supplied streams and <em>returning</em> the
+     * process exit code instead of calling {@link System#exit(int)}. Every outbound channel gets
+     * its production binding here.
+     *
+     * <p>
+     * ⚠ This return value is load-bearing and must stay asserted for a NON-zero code — see
+     * {@code CdiscValidateHelpersTest.run_threeArgOverload_propagatesANonZeroExitCode}. While the
+     * only case reaching this line was a {@code -h} run asserting {@code 0}, replacing the
+     * delegation with {@code run(…); return 0;} left the whole suite green and made every failure
+     * mode of the shipped CLI — bad option, failed install, missing data directory — exit 0.
+     * </p>
+     *
+     * <p>
+     * The four-argument and five-argument overloads that used to sit between this method and the
+     * one below were deleted in round 4: they had no caller, they were each documented "entry point
+     * for tests" while no test used them, and their own delegating returns carried the same
+     * unasserted mutant. Tests that need a seam pass all three, through {@code OfflineCli}.
+     * </p>
      */
     static int run(String[] args, PrintStream out, PrintStream err) throws Exception
+    {
+        return run(args, out, err, httpDownloads(), configuredLibrary(), httpArchives());
+    }
+
+
+    /** Entry point for tests that control every outbound channel this CLI has. */
+    static int run(String[] args, PrintStream out, PrintStream err, DictionaryDownloads aDownloads,
+            LibraryAccess aLibrary, PickleArchives aArchives)
+        throws Exception
     {
         Args parsed;
         try
@@ -301,7 +460,7 @@ public final class CdiscValidate
 
         try
         {
-            return new CdiscValidate().run(parsed, err);
+            return new CdiscValidate(aDownloads, aLibrary, aArchives).run(parsed, err);
         }
         catch (UsageException e)
         {
@@ -320,7 +479,7 @@ public final class CdiscValidate
      */
     private static int runRemote(Args args, RemoteConfig remote, PrintStream err)
     {
-        if (args.data != null && args.data.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))
+        if (args.data != null && isUriLibrary(args.data))
         {
             err.println("Error: --remote requires a local --data path (file or directory), "
                     + "not a URI. The server reads the uploaded files.");
@@ -843,7 +1002,9 @@ public final class CdiscValidate
      *            the parsed arguments.
      * @param aErr
      *            the error stream for usage and failure messages.
-     * @return the process exit code: 0 on success, 2 on a usage error, 1 on a seeding failure.
+     * @return the process exit code: 0 on success, 2 on a usage error, 1 when the seeder throws,
+     *         when the seed report carries warnings, or when the source yielded no cache entries at
+     *         all — a seeding step that produced nothing is not a successful one.
      */
     private int seedCache(Args aArgs, PrintStream aErr)
     {
@@ -865,13 +1026,33 @@ public final class CdiscValidate
                     .builder(source, target, baseUrl).overwriteExisting(aArgs.seedOverwrite)
                     .dryRun(aArgs.seedDryRun).build());
 
-            LOGGER.log(System.Logger.Level.INFO, "Cache {0} at {1}: {2}",
-                    aArgs.seedDryRun ? "seeding (dry run)" : "seeded", target, report.summary());
+            String verb = aArgs.seedDryRun ? "seeding (dry run)" : "seeded";
+            LOGGER.log(System.Logger.Level.INFO, "Cache {0} at {1}: {2}", verb, target,
+                    report.summary());
+            // D3, the installDictionaries template: the summary, the skips and the warnings go to
+            // the operator's stream, not only to the logger, and the report decides the exit code.
+            // Until now every non-throwing seed returned 0 with its findings buried in JUL, so a
+            // CI pipeline saw a green "seed the cache" step followed by a validation run against
+            // a cache that had never been filled.
+            aErr.println("Cache " + verb + " at " + target + ": " + report.summary());
+            for (String skip : report.skipped())
+            {
+                aErr.println("  skipped: " + skip);
+            }
             for (String warning : report.warnings())
             {
                 LOGGER.log(System.Logger.Level.WARNING, "  {0}", warning);
+                aErr.println("  warning: " + warning);
             }
-            return 0;
+            boolean nothingSeeded = report.written().isEmpty() && report.skipped().isEmpty();
+            if (nothingSeeded)
+            {
+                aErr.println("Error: the seed source yielded no cache entries, so " + target
+                        + " is unchanged. Check --seed-cache / --seed-ref / --seed-repo-path "
+                        + "(or --seed-cache-from-dir): the run that follows would use an empty "
+                        + "cache and reach the CDISC Library for everything.");
+            }
+            return nothingSeeded || !report.warnings().isEmpty() ? 1 : 0;
         }
         catch (IOException | RuntimeException e)
         {
@@ -883,7 +1064,7 @@ public final class CdiscValidate
 
 
     /** Chooses the download or local-directory pickle source from the seeding options. */
-    private static PickleSource buildPickleSource(Args aArgs)
+    private PickleSource buildPickleSource(Args aArgs) throws IOException
     {
         if (aArgs.seedCacheFromDir != null)
         {
@@ -896,8 +1077,7 @@ public final class CdiscValidate
         String repoPath = aArgs.seedRepoPath == null || aArgs.seedRepoPath.isBlank()
                 ? HttpArchivePickleSource.DEFAULT_REPO_PATH
                 : aArgs.seedRepoPath;
-        return new HttpArchivePickleSource(repo, aArgs.seedRef, repoPath,
-                aArgs.seedArchiveUrlTemplate,
+        return archives.forRepo(repo, aArgs.seedRef, repoPath, aArgs.seedArchiveUrlTemplate,
                 aArgs.seedWorkDir == null ? null : Path.of(aArgs.seedWorkDir));
     }
 
@@ -986,7 +1166,7 @@ public final class CdiscValidate
                     }
                     else if (DOWNLOADABLE_TYPES.contains(type))
                     {
-                        source = downloadSourceFor(type);
+                        source = downloads.forType(type);
                     }
                     else
                     {
@@ -1117,6 +1297,12 @@ public final class CdiscValidate
      * {@value #SP_UNII_ARCHIVE_URL} for precisionFDA — so tests (and a mirror deployment) can point
      * the installer at another host; the defaults are the public authorities.
      */
+    static DictionaryDownloads httpDownloads()
+    {
+        return CdiscValidate::downloadSourceFor;
+    }
+
+
     private static DictionarySource downloadSourceFor(String aType)
     {
         String evsBase = System.getProperty(SP_EVS_BASE_URL,
@@ -1185,6 +1371,19 @@ public final class CdiscValidate
                 return 2;
             }
         }
+        // The same pre-check for -d / --data, which the comment above claims ("the existence
+        // pre-checks") but did not have. Without it a typo'd data directory reached the engine and
+        // surfaced as an uncaught IOException stack trace rather than the exit-2 contract — and,
+        // worse, with -vx the Define-XML report had ALREADY been written by then against the
+        // typo's PARENT directory (see resolveDefineSubmissionFolder), so the Requires: folder
+        // rules were evaluated against a folder the user never named. A URI library has no local
+        // path to check; "" is left to resolveLibrary, which names it precisely.
+        if (args.data != null && !args.data.isEmpty() && !isUriLibrary(args.data)
+                && !Files.exists(Path.of(args.data)))
+        {
+            err.println("Error: data library not found: " + Path.of(args.data).toAbsolutePath());
+            return 2;
+        }
 
         IDataTableManager manager = new LocalDataTableManager();
 
@@ -1198,7 +1397,7 @@ public final class CdiscValidate
         // the flag is set, and the file's existence was checked at the top of this method.
         if (args.validateXml)
         {
-            runDefineConformance(args, outputBase);
+            runDefineConformance(args, outputBase, err);
         }
 
         // Representative report path (drives the runtime-report file name, which is derived from
@@ -1528,13 +1727,16 @@ public final class CdiscValidate
      * ({@code SKIPPED_MISSING_LIBRARY}).
      * </p>
      */
-    private void runDefineConformance(Args args, Path outputBase) throws IOException
+    private void runDefineConformance(Args args, Path outputBase, PrintStream err)
+        throws IOException
     {
         Path defineXml = Path
                 .of(java.util.Objects.requireNonNull(args.defineXmlPath, "defineXmlPath"))
                 .toAbsolutePath();
         DefineConformanceInput.Builder builder = DefineConformanceInput.builder(defineXml)
                 .useDefaultSubmissionFolder(true);
+        @Nullable
+        CdiscLibraryBackedLibraryProvider libraryProvider = null;
         Path submissionFolder = resolveDefineSubmissionFolder(args);
         if (submissionFolder != null)
         {
@@ -1545,17 +1747,10 @@ public final class CdiscValidate
         {
             builder.versionOverride(versionOverride);
         }
-        String apiKey = CdiscLibraryClient.getApiKey();
-        if (apiKey != null && !apiKey.isBlank())
+        libraryProvider = library.provider(args.cache);
+        if (libraryProvider != null)
         {
-            CdiscLibraryClient.CdiscBuilder client = CdiscLibraryClient.builder();
-            // Same cache resolution as the metadata-enrichment path (CoreLibraryAccessImpl):
-            // -ca dir in the Gzip format that path writes, else the shared default cache
-            // (~/.cdiscApiCache) rather than the builder's no-op fallback.
-            client.cache(args.cache != null
-                    ? new GzipFileApiCache(Path.of(args.cache).toAbsolutePath(), ".json")
-                    : CdiscLibraryClient.getCache());
-            builder.libraryProvider(CdiscLibraryBackedLibraryProvider.over(client.build()));
+            builder.libraryProvider(libraryProvider);
         }
 
         // Selection intent, not a corpus: the engine resolves the packages itself, because the
@@ -1603,6 +1798,14 @@ public final class CdiscValidate
         Path target = outputBase.resolveSibling(fileName(outputBase) + ".define.json");
         JsonReportWriter.write(report, target);
 
+        // The Library counterpart of D13 surface 5 (the "Dictionary basis:" line): a Library
+        // outage makes every library-gated rule answer empty, which the SPI treats as "out of the
+        // rule's reach" — so a fully degraded run produces a report that looks exactly like one
+        // where those rules genuinely passed. The report record itself carries no degradation
+        // field (it is the engine's, in cumba-corej), so the CLI at least says so where a CLI user
+        // looks, instead of leaving it in a single JUL WARNING.
+        printLibraryBasis(libraryProvider, err);
+
         String byCategory = report.findingsByCategory().entrySet().stream()
                 .map(e -> e.getKey().name() + "="
                         + e.getValue().values().stream().mapToLong(Long::longValue).sum())
@@ -1615,6 +1818,45 @@ public final class CdiscValidate
 
 
     /**
+     * D13 surface 5's Library counterpart: says on <b>stderr</b> that a CDISC Library outage
+     * silently narrowed this Define-XML report.
+     *
+     * <p>
+     * The {@code LibraryProvider} SPI turns every failed lookup into an empty answer, which the
+     * engine reads as "out of the rule's reach" — so a fully degraded run produces a report that
+     * looks exactly like one where the library-gated rules genuinely passed. The report record
+     * carries no degradation field (it is the engine's, in {@code cumba-corej}), so the CLI says it
+     * where a CLI user looks instead of leaving it in a single JUL WARNING.
+     * </p>
+     *
+     * <p>
+     * Package-private and separate from {@link #runDefineConformance} for one reason: this is the
+     * user-facing surface of F-cli-06 and it must be assertable without a live Library outage.
+     * Inlined, both its guard and its {@code println} were unkillable (C2-04) — the line could be
+     * deleted outright and the suite stayed green.
+     * </p>
+     *
+     * @param aProvider
+     *            the run's Library provider, or {@code null} when no API key was configured and no
+     *            lookup was ever attempted
+     * @param aErr
+     *            the operator's stream
+     */
+    static void printLibraryBasis(@Nullable CdiscLibraryBackedLibraryProvider aProvider,
+            PrintStream aErr)
+    {
+        List<String> degraded = aProvider == null ? List.of() : aProvider.degradedLookups();
+        if (degraded.isEmpty())
+        {
+            return;
+        }
+        aErr.println("Library basis: " + degraded.size() + " CDISC Library lookup(s) failed ("
+                + String.join(", ", degraded) + "); the library-gated Define-XML rules could "
+                + "not fire for them, so this report under-reports.");
+    }
+
+
+    /**
      * The submission folder for the Define-XML {@code Requires: folder} rules: the {@code -d} data
      * directory when given (a single {@code -d} file → its parent), or {@code null} to let the
      * {@link DefineConformanceInput} default resolve the define.xml's own parent. A {@code -d} URI
@@ -1622,7 +1864,7 @@ public final class CdiscValidate
      */
     private static @Nullable Path resolveDefineSubmissionFolder(Args args)
     {
-        if (args.data == null || args.data.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))
+        if (args.data == null || isUriLibrary(args.data))
         {
             return null;
         }
@@ -1631,7 +1873,26 @@ public final class CdiscValidate
         {
             return dataPath;
         }
+        if (!Files.isRegularFile(dataPath))
+        {
+            // Neither a directory nor a file. Returning getParent() here invented a SIBLING
+            // directory: `-d study/dta` (a typo for study/data) handed study/ to the
+            // Requires: folder rules, which then reported on a folder the user never named.
+            // Fall through to the documented default — the define.xml's own parent.
+            return null;
+        }
         return dataPath.getParent();
+    }
+
+
+    /**
+     * Whether a {@code -d / --data} value is a URI ({@code scheme://…}) rather than a local path.
+     * One spelling shared by remote mode, the {@code -d} existence pre-check and the Define-XML
+     * submission-folder resolution — it used to be written out three times.
+     */
+    private static boolean isUriLibrary(String aData)
+    {
+        return aData.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*");
     }
 
 
@@ -1879,7 +2140,8 @@ public final class CdiscValidate
         out.println(
                 "                                   (default 1000, from -Dcorej.maxErrorsPerRule");
         out.println(
-                "                                   then MAX_ERRORS_PER_RULE; <= 0 = unlimited).");
+                "                                   then MAX_ERRORS_PER_RULE; 0 = unlimited, a");
+        out.println("                                   negative value is a usage error).");
         out.println("                                   Extra violations are counted, not listed.");
         out.println(
                 "  -ds, --dataset <name>[,<name>..] validate only these library members (others");
@@ -2214,15 +2476,19 @@ public final class CdiscValidate
         /**
          * Per-rule findings cap (per dataset). Accepts a plain integer; for Python-CLI
          * compatibility a tuple form like {@code "(1000, True)"} is tolerated — the leading integer
-         * is used. {@code <= 0} means unlimited. Null follows the engine default
-         * ({@code -Dcorej.maxErrorsPerRule}, then {@code MAX_ERRORS_PER_RULE}, then 1000).
+         * is used. {@code 0} means unlimited; a <b>negative</b> cap is a usage error and never
+         * reaches the engine (2026-09-08 ruling — {@code EngineLimits.resolve} would treat it as
+         * unlimited too, but a negative is far more likely a typo than an intent). Null follows the
+         * engine default ({@code -Dcorej.maxErrorsPerRule}, then {@code MAX_ERRORS_PER_RULE}, then
+         * 1000).
          */
         @Option(names =
         {
                 "-me", "--max-errors-per-rule"
         }, description = "Max findings to materialise per rule (per dataset); extra violations are "
                 + "counted but not listed. Default follows -Dcorej.maxErrorsPerRule, then "
-                + "MAX_ERRORS_PER_RULE, then 1000; <= 0 = unlimited.")
+                + "MAX_ERRORS_PER_RULE, then 1000; 0 = unlimited, a negative value is "
+                + "rejected.")
         @Nullable
         String maxErrorsRaw;
 
@@ -2673,15 +2939,39 @@ public final class CdiscValidate
 
             if (a.maxErrorsRaw != null)
             {
-                // Plain integer, or Python-CLI tuple form "(N, bool)" — take the leading integer.
-                java.util.regex.Matcher m = java.util.regex.Pattern.compile("-?\\d+")
-                        .matcher(a.maxErrorsRaw);
-                if (!m.find())
+                // The WHOLE token must be an integer, or the Python-CLI tuple form "(N, bool)".
+                // This used to be a find() over "-?\\d+", which scans ANYWHERE in the string: a
+                // typo'd "--max-errors-per-rule v2.1" silently capped at 2, and "(-3, True)" was
+                // accepted as -3. The cap changes how many findings per rule are materialised, so
+                // a mistyped value is a RESULT change, not a cosmetic one — it fails loudly.
+                // C2-06: the parens must be BALANCED and the tuple's second element must be a
+                // Python bool. "^\\(?…\\)?$" made each paren independently optional, so "(5",
+                // "5)" and "(5, True" were read as 5, and "[A-Za-z]+" accepted "(5, banana)".
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("^(?:(-?\\d+)"
+                                + "|\\(\\s*(-?\\d+)\\s*(?:,\\s*(?:[Tt]rue|[Ff]alse)\\s*)?\\))$")
+                        .matcher(a.maxErrorsRaw.trim());
+                if (!m.matches())
                 {
-                    throw new UsageException(
-                            "--max-errors-per-rule expects an integer, got: " + a.maxErrorsRaw);
+                    throw new UsageException("--max-errors-per-rule expects an integer or the "
+                            + "Python-CLI \"(N, bool)\" tuple form, got: " + a.maxErrorsRaw);
                 }
-                a.maxErrorsPerRule = Integer.valueOf(m.group());
+                int cap;
+                try
+                {
+                    cap = Integer.parseInt(m.group(1) != null ? m.group(1) : m.group(2));
+                }
+                catch (NumberFormatException _)
+                {
+                    throw new UsageException("--max-errors-per-rule is out of range for a 32-bit "
+                            + "integer, got: " + a.maxErrorsRaw);
+                }
+                if (cap < 0)
+                {
+                    throw new UsageException("--max-errors-per-rule must not be negative (a "
+                            + "negative cap has no meaning), got: " + a.maxErrorsRaw);
+                }
+                a.maxErrorsPerRule = cap;
             }
 
             // Cache seeding and dictionary installation are standalone maintenance modes: they

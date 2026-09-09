@@ -297,6 +297,40 @@
         -->
         <central.skipPublishing>false</central.skipPublishing>
 
+        <!--
+            === Pitest `avoidCallsTo` — logging calls are not mutated ===
+
+            RULED 2026-09-08: mutants of `LOGGER.log(...)` are excluded from the
+            mutator set. `LOGGER` is Lombok-injected via lombok.config as a
+            `java.lang.System.Logger` (bytecode owner `java/lang/System$Logger`),
+            which routes to JUL -> System.err. No test in this module captures
+            System.err — every harness passes its own streams into
+            `run(args, out, err)` — so `removed call to System$Logger::log`
+            mutants are UNKILLABLE by construction, and killing them would mean
+            coupling the test suite to logging output. The instrument must stop
+            counting what it cannot observe.
+
+            ⚠⚠ `avoidCallsTo` REPLACES pitest's built-in default list, it does
+            not extend it: `MojoToReportOptionsConverter` does
+            `if (hasValue(mojo.getAvoidCallsTo())) opts.setLoggingClasses(...)`,
+            a plain setter over `ReportOptions.LOGGING_CLASSES`. So the six
+            defaults below MUST be re-listed verbatim — dropping them would
+            silently re-enable mutation of slf4j / JUL / log4j calls elsewhere.
+            Default list (pitest 1.30.0, ReportOptions.LOGGING_CLASSES):
+            java.util.logging, org.apache.log4j, org.apache.logging.log4j,
+            org.slf4j, org.apache.commons.logging, org.jboss.logging.
+
+            ⚠ `java.lang.System.Logger` is a JDK 9+ API and is NOT in that
+            default list — that is exactly why these mutants existed. Write the
+            NESTED-class form `java.lang.System$Logger`: the filter maps '.' to
+            '/' and prefix-matches the call's bytecode owner, so the dotted form
+            would become `java/lang/System/Logger` and match nothing.
+
+            ⚠ Semantics are LINE-based, not call-based: pitest creates no
+            mutation on a line that contains a matching call. Keep logging
+            statements on their own lines.
+        -->
+
 
         <!--
             Aggregate JaCoCo report consumed by Sonar. One aggregator now
@@ -711,6 +745,22 @@
                                 -->
                                 <excludedTestClasses>${pitest.excludedTestClasses}</excludedTestClasses>
                                 <excludedClasses>${pitest.excludedClasses}</excludedClasses>
+                                <!--
+                                    Classes whose calls are never mutated. See the
+                                    long note beside the pitest properties above:
+                                    this REPLACES pitest's default list, so the six
+                                    defaults are re-listed verbatim and only
+                                    java.lang.System$Logger is added.
+                                -->
+                                <avoidCallsTo>
+                                    <avoidCallTo>java.util.logging</avoidCallTo>
+                                    <avoidCallTo>org.apache.log4j</avoidCallTo>
+                                    <avoidCallTo>org.apache.logging.log4j</avoidCallTo>
+                                    <avoidCallTo>org.slf4j</avoidCallTo>
+                                    <avoidCallTo>org.apache.commons.logging</avoidCallTo>
+                                    <avoidCallTo>org.jboss.logging</avoidCallTo>
+                                    <avoidCallTo>java.lang.System$Logger</avoidCallTo>
+                                </avoidCallsTo>
                                 <!--
                                     Pin pitest's own `skipTests` to false. The plugin binds
                                     it to ${skipTests} by default, so CI's dedicated

@@ -15,6 +15,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.cumba.cdisc.library.api.model.products.Products;
+import net.cumba.cdisc.library.api.model.sdtm.SdtmProduct;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,6 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
  * parse), never a corpus-dependent finding total.
  * </p>
  */
+@org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateDefineXmlTest
 {
 
@@ -154,6 +158,80 @@ class CdiscValidateDefineXmlTest
     }
 
 
+    /**
+     * C3-02: pins the <b>call site</b>, not the method. {@code printLibraryBasis} itself is covered
+     * by {@code CdiscValidateHelpersTest}, but every other end-to-end case here runs with no API
+     * key, so the provider is {@code null}, the method returns at its first {@code if}, and
+     * {@code removed call to printLibraryBasis} in {@code runDefineConformance} is
+     * <b>equivalent</b> — the recorded kill of {@code CdiscValidate:1651} was false. This case
+     * injects a provider that has already recorded a failed lookup, so deleting the call from
+     * {@code runDefineConformance} makes exactly this assertion fail.
+     *
+     * <p>
+     * The lookup is provoked here rather than left to the engine on purpose: whether a rule asks
+     * the Library depends on the corpus, and this test is about the CLI reporting degradation it
+     * was handed, not about which rules ask.
+     * </p>
+     */
+    @Test
+    void validateXml_degradedLibrary_saysSoOnStderr() throws Exception
+    {
+        CdiscLibraryBackedLibraryProvider provider = new CdiscLibraryBackedLibraryProvider(
+                new CdiscLibraryBackedLibraryProvider.ProductSource()
+                {
+
+                    @Override
+                    public @Nullable SdtmProduct fetch(String aProductId, String aVersion)
+                        throws IOException
+                    {
+                        throw new IOException("offline");
+                    }
+
+
+                    @Override
+                    public @Nullable Products catalog() throws IOException
+                    {
+                        throw new IOException("offline");
+                    }
+                });
+        assertTrue(provider.datasetLabel("SDTMIG", "3.4", "DM").isEmpty(),
+                "a failing ProductSource answers empty");
+        assertEquals(java.util.List.of("sdtmig|3-4"), provider.degradedLookups(),
+                "the provider handed to the CLI has one recorded failure");
+
+        Path emptyData = Files.createDirectory(tempDir.resolve("data-degraded"));
+        Captured cap = new Captured();
+        try
+        {
+            OfflineCli.run(new String[]
+            {
+                    "-vx", "-d", emptyData.toString(), "-dxp", fixture().toString(), "-o",
+                    tempDir.resolve("degraded.json").toString(), "--rules-dir", tempDir.toString(),
+                    "--define-rules-dir", defineRules(tempDir), "--define-family", "CDISC"
+            }, cap.out, cap.err, aCacheDir -> provider);
+        }
+        catch (IOException | RuntimeException _)
+        {
+            // Data-lane variance is out of scope; the conformance report is already written.
+        }
+
+        assertTrue(Files.exists(tempDir.resolve("degraded.define.json")),
+                "the conformance report is written");
+        String err = cap.errAsString();
+        // ⚠ The COUNT is deliberately not asserted here. This case hands the live run a provider
+        // it has already poked once, and whether a define rule asks the Library a second time
+        // depends on the corpus — so pinning "1 … failed" would red for a corpus change that has
+        // nothing to do with the call site under test. The exact count wording is pinned, against
+        // a provider nobody else touches, by
+        // printLibraryBasis_namesEveryFailedLookupAndSaysTheReportUnderReports.
+        assertTrue(err.contains("Library basis:"),
+                "runDefineConformance must report the degraded Library on stderr: " + err);
+        assertTrue(err.contains("sdtmig|3-4"), "the failed lookup is named: " + err);
+        assertTrue(err.contains("under-reports"),
+                "the consequence is stated, not just the count: " + err);
+    }
+
+
     @Test
     void validateXml_falseyValue_disablesReport() throws Exception
     {
@@ -178,7 +256,7 @@ class CdiscValidateDefineXmlTest
         Path emptyData = Files.createDirectory(tempDir.resolve("data-nodxp"));
 
         Captured cap = new Captured();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-vx", "-d", emptyData.toString()
         }, cap.out, cap.err);
@@ -202,7 +280,7 @@ class CdiscValidateDefineXmlTest
         String remoteUrl = "http://localhost:" + refusedPort;
 
         Captured cap = new Captured();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--remote", remoteUrl, "-dxp", fixture().toString(), "-vx"
         }, cap.out, cap.err);
@@ -220,7 +298,7 @@ class CdiscValidateDefineXmlTest
         Path emptyData = Files.createDirectory(tempDir.resolve("data-baddef"));
 
         Captured cap = new Captured();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", emptyData.toString(), "-dxp", fixture().toString(), "-vx", "--define-family",
                 "CDISC", "-o", tempDir.resolve("x.json").toString(), "--define-rules-dir",
@@ -245,7 +323,7 @@ class CdiscValidateDefineXmlTest
         Path emptyData = Files.createDirectory(tempDir.resolve("data"));
 
         Captured cap = new Captured();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", emptyData.toString(), "-dxp", fixture().toString(), "-vx", "-o",
                 tempDir.resolve("x.json").toString(), "--define-rules-dir", defineRules(tempDir)
@@ -266,7 +344,7 @@ class CdiscValidateDefineXmlTest
         Path emptyData = Files.createDirectory(tempDir.resolve("data"));
 
         Captured cap = new Captured();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-d", emptyData.toString(), "-dxp", fixture().toString(), "-vx", "--define-family",
                 "NOT-A-SHEET", "-o", tempDir.resolve("x.json").toString(), "--define-rules-dir",
@@ -288,7 +366,7 @@ class CdiscValidateDefineXmlTest
     {
         try
         {
-            CdiscValidate.run(args, cap.out, cap.err);
+            OfflineCli.run(args, cap.out, cap.err);
         }
         catch (java.io.IOException | RuntimeException _)
         {

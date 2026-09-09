@@ -70,8 +70,22 @@ public final class CdiscLibraryBackedLibraryProvider implements LibraryProvider
     /** {@code productId|version} → fetched IG (or Model) product; empty = unknown/unreachable. */
     private final Map<String, Optional<SdtmProduct>> products = new ConcurrentHashMap<>();
 
-    /** Products already WARN-logged as unreachable, so a broken run logs once per product. */
-    private final Set<String> warned = ConcurrentHashMap.newKeySet();
+    /**
+     * Products already WARN-logged as unreachable, so a broken run logs once per product — and the
+     * backing set for {@link #degradedLookups()}.
+     *
+     * <p>
+     * ⚠ The backing map is a {@code ConcurrentSkipListMap} <b>on purpose</b>: iteration is
+     * <b>lexicographic by lookup key</b>, which is what makes the "Library basis" line and the test
+     * that asserts it deterministic. Lookups run concurrently across rules, so insertion order is
+     * whatever the scheduler produced that run. Do not "simplify" this to
+     * {@code ConcurrentHashMap.newKeySet()} (unordered) or to a {@code LinkedHashSet} (insertion
+     * order, and not thread-safe): either breaks the ordering assertion, and the second also drops
+     * the concurrency guarantee this class relies on.
+     * </p>
+     */
+    private final Set<String> warned = java.util.Collections
+            .newSetFromMap(new java.util.concurrent.ConcurrentSkipListMap<>());
 
     /** Single-key memo for the products catalog (same pattern as {@link #products}). */
     private final Map<String, Optional<Products>> catalogMemo = new ConcurrentHashMap<>();
@@ -274,6 +288,22 @@ public final class CdiscLibraryBackedLibraryProvider implements LibraryProvider
                 return Optional.empty();
             }
         });
+    }
+
+
+    /**
+     * The lookup keys ({@code productId|version}, or {@code products-catalog}) that failed this
+     * run, in <b>lexicographic</b> order (see {@link #warned}: sorted, for a deterministic line and
+     * a stable assertion — <em>not</em> insertion order, which concurrent lookups do not fix) — a
+     * Library outage is otherwise invisible outside the JUL log, and the {@code LibraryProvider}
+     * SPI turns every failure into an indistinguishable empty answer. The CLI prints these as the
+     * "Library basis" line, the Library counterpart of the dictionary path's D13 surface 5.
+     *
+     * @return the failed lookup keys; empty when every lookup this run was answered.
+     */
+    List<String> degradedLookups()
+    {
+        return List.copyOf(warned);
     }
 
 

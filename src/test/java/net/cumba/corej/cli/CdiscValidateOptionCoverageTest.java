@@ -30,6 +30,7 @@ import picocli.CommandLine;
  * are deliberately undocumented and are skipped.
  * </p>
  */
+@org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateOptionCoverageTest
 {
 
@@ -42,6 +43,28 @@ class CdiscValidateOptionCoverageTest
     private static boolean documented(String banner, String longName)
     {
         return Pattern.compile(Pattern.quote(longName) + "(?![A-Za-z0-9-])").matcher(banner).find();
+    }
+
+
+    /**
+     * C2-01. The owner ruled 2026-09-08 that {@code 0} is unlimited and a <b>negative</b> cap fails
+     * loud. {@code Args.parse} rejects a negative, so no printed contract may still promise
+     * {@code "<= 0 = unlimited"} — the banner (asserted in {@code CdiscValidateUsageTest}) and this
+     * {@code @Option} description, which is the second of the two help-text sources this class
+     * exists to keep from drifting.
+     */
+    @Test
+    void maxErrorsPerRule_printedContractMatchesTheRuledBehaviour()
+    {
+        CommandLine.Model.OptionSpec option = new CommandLine(new CdiscValidate.Args())
+                .getCommandSpec().findOption("--max-errors-per-rule");
+        String description = String.join(" ", option.description());
+
+        assertTrue(description.contains("0 = unlimited"), description);
+        assertTrue(description.contains("negative value is rejected"), description);
+        assertTrue(!description.contains("<= 0"),
+                "the description still promises that a negative cap means unlimited, which "
+                        + "Args.parse rejects with exit 2: " + description);
     }
 
 
@@ -105,7 +128,7 @@ class CdiscValidateOptionCoverageTest
     {
         ByteArrayOutputStream outBuf = new ByteArrayOutputStream();
         ByteArrayOutputStream errBuf = new ByteArrayOutputStream();
-        CdiscValidate.run(new String[]
+        OfflineCli.run(new String[]
         {
                 "-h"
         }, new PrintStream(outBuf, true, StandardCharsets.UTF_8),

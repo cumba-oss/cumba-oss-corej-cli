@@ -35,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
  * skipping their assertions rather than failing on infrastructure.
  * </p>
  */
+@org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateInstallDictionariesTest
 {
 
@@ -46,8 +47,25 @@ class CdiscValidateInstallDictionariesTest
     /**
      * States the ambient configuration these tests depend on instead of inheriting it silently: the
      * degraded-run case asserts that NO dictionary loads, which holds only while nothing in the
-     * environment quietly supplies one. The conventional {@code ./dictionaries} is resolved against
-     * the surefire working directory (this module), where none exists.
+     * environment quietly supplies one.
+     *
+     * <p>
+     * ⚠ The third assertion this method used to carry — {@code assertFalse(Files.isDirectory("./
+     * dictionaries"))} — was <b>removed</b>, not relaxed. It was self-disarming: a mutant that
+     * redirected an install into the module directory left the directory behind, and from then on
+     * every pitest minion for this class failed here, in {@code @BeforeAll}, before running a
+     * single test. JUnit reported a container error and pitest scored the mutant {@code RUN_ERROR}
+     * with {@code detected='true'} and {@code numberOfTestsRun='0'} — 37 mutants counted as killed
+     * without a test having observed any of them. {@link WorkingDirectoryStaysCleanExtension} now
+     * both asserts the redirect (a real kill, by a test that ran) and removes the residue, so the
+     * precondition holds by construction instead of by an assertion that stops the class.
+     * </p>
+     *
+     * <p>
+     * The env var and system property stay here: nothing in this suite can create them, so neither
+     * check can disarm itself, and a container-level failure is the honest report for a machine
+     * configured in a way these tests cannot run under.
+     * </p>
      */
     @BeforeAll
     static void noAmbientDictionaryStoreMayBeConfigured()
@@ -56,8 +74,6 @@ class CdiscValidateInstallDictionariesTest
                 "unset " + DictionaryDirectoryResolver.ENV_DIR + " before running these tests");
         assertNull(System.getProperty(DictionaryDirectoryResolver.SP_DIR),
                 "clear -D" + DictionaryDirectoryResolver.SP_DIR + " before running these tests");
-        assertFalse(Files.isDirectory(Path.of(DictionaryDirectoryResolver.DEFAULT_DIR)),
-                "a ./dictionaries directory in the module would leak into the degraded-run case");
     }
 
 
@@ -177,13 +193,33 @@ class CdiscValidateInstallDictionariesTest
 
     private static Run invoke(String... aArgs) throws Exception
     {
+        return invoke(OfflineCli.DENIED, aArgs);
+    }
+
+
+    /**
+     * The download-path variant: runs with the <b>production</b> download seam, which resolves the
+     * two authority URLs from the system properties {@link StubAuthorities} overrides — so these
+     * cases still exercise the real {@code HttpDictionarySource}, against loopback. Everything else
+     * in this class installs from a local path and must never be able to reach a network at all.
+     */
+    private static Run invokeDownloading(String... aArgs) throws Exception
+    {
+        return invoke(CdiscValidate.httpDownloads(), aArgs);
+    }
+
+
+    private static Run invoke(CdiscValidate.DictionaryDownloads aDownloads, String... aArgs)
+        throws Exception
+    {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         int code;
         try (PrintStream o = new PrintStream(out, true, StandardCharsets.UTF_8);
                 PrintStream e = new PrintStream(err, true, StandardCharsets.UTF_8))
         {
-            code = CdiscValidate.run(aArgs, o, e);
+            code = CdiscValidate.run(aArgs, o, e, aDownloads, CdiscValidate.configuredLibrary(),
+                    OfflineCli.NO_ARCHIVE);
         }
         return new Run(code, out.toString(StandardCharsets.UTF_8),
                 err.toString(StandardCharsets.UTF_8));
@@ -242,6 +278,31 @@ class CdiscValidateInstallDictionariesTest
     }
 
 
+    /**
+     * F-cli-01, the mutant this class exists to kill: negating the {@code --dictionaries-dir} guard
+     * at the head of {@code installTargetDir}'s D4 precedence chain drops the explicit flag and the
+     * install lands in the CWD-relative {@code ./dictionaries} default instead. The redirect is
+     * asserted on three independent surfaces — the summary line names the requested store, the
+     * store holds the document, and the default directory was not created — so it is KILLED by a
+     * test that ran and observed it rather than scored {@code RUN_ERROR} because it poisoned the
+     * next minion. {@link WorkingDirectoryStaysCleanExtension} removes the residue.
+     */
+    @Test
+    void installGoesWhereTheFlagSaysAndNowhereElse() throws Exception
+    {
+        Run run = invoke("--install-dictionaries", "--dictionaries-dir", store().toString(),
+                "--unii", uniiRawDir("4Aug2026").toString());
+
+        assertEquals(0, run.exitCode(), run.err());
+        assertTrue(run.err().contains("Dictionaries installed into " + store() + ":"),
+                "the summary must name the store the caller chose: " + run.err());
+        assertTrue(Files.isDirectory(store().resolve("unii")), run.err());
+        assertFalse(Files.exists(Path.of(DictionaryDirectoryResolver.DEFAULT_DIR)),
+                "--dictionaries-dir was given, so the CWD-relative ./dictionaries default must "
+                        + "never be created — a single flipped guard is all it takes");
+    }
+
+
     /** What the CLI installs is exactly what a validate run's store then binds. */
     @Test
     void whatTheCliInstallsIsWhatTheStoreLoads() throws Exception
@@ -279,7 +340,8 @@ class CdiscValidateInstallDictionariesTest
     {
         try (StubAuthorities _ = new StubAuthorities())
         {
-            Run run = invoke("--install-dictionaries", "--dictionaries-dir", store().toString());
+            Run run = invokeDownloading("--install-dictionaries", "--dictionaries-dir",
+                    store().toString());
 
             assertEquals(0, run.exitCode(), run.err());
             assertTrue(run.err().contains("3 installed"), run.err());
@@ -312,8 +374,8 @@ class CdiscValidateInstallDictionariesTest
     {
         try (StubAuthorities _ = new StubAuthorities())
         {
-            Run run = invoke("--install-dictionaries", "--dictionaries-dir", store().toString(),
-                    "--medrt");
+            Run run = invokeDownloading("--install-dictionaries", "--dictionaries-dir",
+                    store().toString(), "--medrt");
 
             assertEquals(0, run.exitCode(), run.err());
             assertTrue(run.err().contains("1 installed"), run.err());
@@ -691,10 +753,12 @@ class CdiscValidateInstallDictionariesTest
                         """,
                 basisErr);
 
-        if (rc == null)
-        {
-            return; // Library unreachable — nothing to assert about run output.
-        }
+        // ⚠ `if (rc == null) return;` here reported PASSED with no assertion having executed —
+        // a green non-test, and the reason the whole tail of run(Args,PrintStream) after the
+        // engine call was unpinned. An assumption reports the same run as SKIPPED, which is what
+        // "the Library was unreachable" actually is.
+        org.junit.jupiter.api.Assumptions.assumeTrue(rc != null,
+                "CDISC Library unreachable — the degraded-run case needs a real validation");
         assertEquals(0, rc.intValue(), basisErr.toString(StandardCharsets.UTF_8));
         String err = basisErr.toString(StandardCharsets.UTF_8);
         assertTrue(err.contains("Dictionary basis: "), err);
@@ -717,10 +781,8 @@ class CdiscValidateInstallDictionariesTest
                 }
                 """, basisErr);
 
-        if (rc == null)
-        {
-            return;
-        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(rc != null,
+                "CDISC Library unreachable — the healthy-run case needs a real validation");
         assertEquals(0, rc.intValue(), basisErr.toString(StandardCharsets.UTF_8));
         assertFalse(basisErr.toString(StandardCharsets.UTF_8).contains("Dictionary basis:"),
                 "no dictionary rule in the run — the line must not appear");
@@ -760,7 +822,7 @@ class CdiscValidateInstallDictionariesTest
                 StandardCharsets.UTF_8);
                 PrintStream e = new PrintStream(errBuf, true, StandardCharsets.UTF_8))
         {
-            return CdiscValidate.run(new String[]
+            return OfflineCli.run(new String[]
             {
                     "-d", source.toString(), "-o", tempDir.resolve("rep.json").toString(), "-rp",
                     "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()

@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * for usage text). The help banner is emitted to stdout for {@code -h} and to stderr for a usage
  * error; both routes go through {@code printUsage}.
  */
+@org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateUsageTest
 {
 
@@ -53,7 +54,7 @@ class CdiscValidateUsageTest
             "it is SKIPPED, with that reason stated.", "-me, --max-errors-per-rule <n>",
             "findings materialised per rule, per dataset",
             "(default 1000, from -Dcorej.maxErrorsPerRule",
-            "then MAX_ERRORS_PER_RULE; <= 0 = unlimited).",
+            "then MAX_ERRORS_PER_RULE; 0 = unlimited, a", "negative value is a usage error).",
             "Extra violations are counted, not listed.", "-ds, --dataset <name>[,<name>..]",
             "validate only these library members (others",
             "become lazy references; repeatable, comma-sep)", "-rd, --reference-data <path>",
@@ -116,7 +117,7 @@ class CdiscValidateUsageTest
             "it is SKIPPED, with that reason stated.", "-me, --max-errors-per-rule <n>",
             "findings materialised per rule, per dataset",
             "(default 1000, from -Dcorej.maxErrorsPerRule",
-            "then MAX_ERRORS_PER_RULE; <= 0 = unlimited).",
+            "then MAX_ERRORS_PER_RULE; 0 = unlimited, a", "negative value is a usage error).",
             "Extra violations are counted, not listed.", "-ds, --dataset <name>[,<name>..]",
             "validate only these library members (others",
             "become lazy references; repeatable, comma-sep)", "-rd, --reference-data <path>",
@@ -199,7 +200,11 @@ class CdiscValidateUsageTest
         // --max-errors-per-rule (4 lines). They were found by
         // CdiscValidateOptionCoverageTest, the reflection guard that now fails whenever a
         // non-hidden @Option is absent from this banner.
-        assertEquals(136, lineCount, "help banner line count changed: " + lineCount);
+        // 137 since the C2-01 ruling ("0 is unlimited, negative fails loud") replaced the
+        // banner's "<= 0 = unlimited" with a two-line wording that also states the rejection —
+        // the guard at Args.parse rejects a negative cap, so the printed contract had to stop
+        // promising that one works.
+        assertEquals(137, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();
@@ -212,7 +217,7 @@ class CdiscValidateUsageTest
     {
         // A usage error (unknown option) prints "Error: ..." then the full banner to stderr.
         Captured cap = new Captured();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "--no-such-flag"
         }, cap.out, cap.err);
@@ -232,7 +237,7 @@ class CdiscValidateUsageTest
     private static String helpOutput() throws Exception
     {
         Captured cap = new Captured();
-        int rc = CdiscValidate.run(new String[]
+        int rc = OfflineCli.run(new String[]
         {
                 "-h"
         }, cap.out, cap.err);
