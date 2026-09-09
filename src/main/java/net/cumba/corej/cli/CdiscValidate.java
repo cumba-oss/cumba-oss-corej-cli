@@ -1655,8 +1655,8 @@ public final class CdiscValidate
      * <p>
      * Only {@code -mr / --max-report-rows} has a counterpart today, and it is matched by the
      * property <b>name</b> the writer declares rather than by importing the writer's class — which
-     * is the whole point: the CLI does not depend on {@code corej-cdisc-report-xlsx}. A format that
-     * does not declare {@code maxRowsPerSheet} simply gets an empty map.
+     * is the whole point: the CLI does not depend on {@code cumba-oss-corej-report-xlsx}. A format
+     * that does not declare {@code maxRowsPerSheet} simply gets an empty map.
      * </p>
      */
     private static Map<Property, String> writerProperties(ReportFormat format, Args args)

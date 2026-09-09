@@ -46,7 +46,7 @@ class CdiscValidateDefineXmlTest
      * <p>
      * ⚑ These tests used to reach across modules for the real corpus
      * ({@code repoRoot + "lib/corej-define-conformance/rules"}). That corpus has since moved to
-     * {@code corej-cdisc-rules} and is now generated rather than authored, but the cross-module
+     * {@code cumba-oss-corej-rules} and is now generated rather than authored, but the cross-module
      * path was worth losing on its own account: it coupled this client's tests to another module's
      * on-disk layout, and none of them assert on rule content — they assert the report's
      * <em>structure</em>. A synthetic package is therefore both sufficient and hermetic, and it
