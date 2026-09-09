@@ -271,11 +271,29 @@ environment variable or `-Dcdisc.library.api.key`. Two offline routes avoid it:
 credential-free MED-RT, UNII and neoplasm sets. It is a local maintenance mode and is rejected in
 combination with `--remote`.
 
+## Containers
+
+`Dockerfile`, `docker-compose.yml` and `docker-entrypoint.sh` build and run the CLI as a one-shot
+container, from this repository alone:
+
+```sh
+docker compose build
+docker compose run --rm cli --help
+docker compose run --rm cli -rp cdisc-sdtmig-3-4 -d /data/datasets -o /data/CORE-Report.json
+```
+
+The build stage runs one `mvn -B -DskipTests package` and unpacks the dist zip; the runtime stage
+is a JRE over that bundle, running as uid 1000. Compose bind-mounts `./corej-data` at `/data`, so
+the study, its report, the dictionary store and the seeded CDISC Library API cache all stay on the
+host — `mkdir -p corej-data && sudo chown -R 1000:1000 corej-data` once, first.
+
+⚠ **The image bakes no rule corpus.** The corpora are released separately by
+`cumba-oss-corej-rules` and are not Maven dependencies. Unpack the release assets into
+`corej-data/rules` and `corej-data/rules-define`; until then every run reports that it found no
+packages, and the entrypoint says so before the run starts.
+
 ## What is deliberately not here
 
-- **Containers.** The `Dockerfile`, Compose file and entrypoint were wired to the monorepo layout
-  (`dist/` bundle modules, the rule corpus in a sibling module) and could not build from this
-  repository.
 - **The rule editor.** Not part of the open-source distribution.
 
 ## Test data

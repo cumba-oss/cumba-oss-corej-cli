@@ -1,0 +1,80 @@
+# coreJ CDISC validation CLI — build + run the containerised command-line client.
+#
+# This is NOT a long-running service: the container runs one validation and exits.
+# Use `docker compose run` (not `up`), which forwards trailing args to the CLI.
+# The image builds itself from source (multi-stage; see Dockerfile) with the build
+# context at this repository root.
+#
+#   docker compose build                         # build the image from source
+#   docker compose run --rm cli --help           # show CLI usage
+#   docker compose run --rm cli --seed-cache     # seed the CDISC Library API cache —
+#                                                # ONCE, onto ./corej-data/api-cache;
+#                                                # without it every rule needing CDISC
+#                                                # Library metadata SKIPs (the run says so)
+#   docker compose run --rm cli \                # install dictionaries — ONCE, onto
+#       --install-dictionaries                   # ./corej-data/dictionaries; without them
+#                                                # every dictionary rule SKIPs
+#   docker compose run --rm cli \                # validate a study under ./corej-data
+#       -rp cdisc-sdtmig-3-4 -d /data/datasets -o /data/CORE-Report.json
+#
+# Data lives in ./corej-data beside this file; CWD-relative inputs and the report
+# output land there. The path is repo-relative on purpose — the compose file IS at
+# the repository root.
+#
+# First run only — the container runs as uid 1000, so that host directory must be
+# owned by uid 1000 or the CLI can't write its report (you'll see a
+# `Permission denied`). From the repo root:
+#   mkdir -p corej-data && sudo chown -R 1000:1000 corej-data
+
+name: cumba-oss-corej-cli
+
+services:
+  cli:
+    build:
+      # THIS repository: flat, single-module, and it builds itself.
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE:-maven:3.9-eclipse-temurin-25}
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-eclipse-temurin:25-jre}
+    image: cumba-oss-corej-cli:local
+    init: true
+    environment:
+      # --- CDISC Library API key (optional; blank = Library enrichment skipped,
+      #     which can leave rules SKIPPED) ---
+      CDISC_API_KEY: "${CDISC_API_KEY:-}"
+      # --- the rule corpus. ⚠⚠ THIS IMAGE SHIPS NONE: the corpora are released
+      #     separately by cumba-oss-corej-rules and are not Maven dependencies, so
+      #     the build has nothing to bake. Unpack the release asset into
+      #     ./corej-data/rules so it holds packages.json and rules-*.json directly;
+      #     until then every run reports that it found no packages. Same for
+      #     ./corej-data/rules-define, which -vx needs. ---
+      COREJ_RULES_DIR: "${COREJ_RULES_DIR:-/data/rules}"
+      COREJ_DEFINE_RULES_DIR: "${COREJ_DEFINE_RULES_DIR:-/data/rules-define}"
+      # --- the CDISC Library web-API cache and the external-dictionary store, both
+      #     moved onto the ./corej-data bind mount so ONE mount holds everything and
+      #     it is all browsable on the host. The image's own defaults sit under /app
+      #     (see the Dockerfile) because a bare `docker run -v "$PWD":/data` mounts
+      #     the caller's own working directory; here /data is a directory that
+      #     exists to serve this stack, so there is nothing to pollute.
+      #     ⚠⚠ Both go in a SUBDIRECTORY, never at /data directly. `-d <dir>` stages
+      #     every REGULAR FILE it lists, with no extension filter, so a loose cache
+      #     file at /data would be uploaded as a study dataset by `-d /data`.
+      #     Directories are skipped, which is why these are safe where they are.
+      #     -ca / --cache on the command line still outranks the env setting. ---
+      CDISC_API_CACHE: "${CDISC_API_CACHE:-/data/api-cache}"
+      COREJ_DICTIONARIES_DIR: "${COREJ_DICTIONARIES_DIR:-/data/dictionaries}"
+      # --- extra JVM options, e.g. -Xmx2g (auto-applied by the JVM) ---
+      JAVA_TOOL_OPTIONS: "${JAVA_TOOL_OPTIONS:-}"
+    volumes:
+      # Host bind mount: studies + report output are browsable at the repo-root
+      # ./corej-data. Must be owned by uid 1000 — see the header comment.
+      # ONE mount, holding everything that must outlive a `run --rm` container:
+      # the study and its report, plus api-cache/ and dictionaries/ (the env above)
+      # and the rules-define/ the entrypoint seeds here. All of it visible and
+      # manageable on the host — a named volume would hide it under
+      # /var/lib/docker and need `docker volume rm` to reset.
+      # ⚠ Without this, /app paths are IMAGE LAYERS: `run --rm cli --seed-cache`
+      # and `--install-dictionaries` would each report success and lose everything
+      # at container exit, leaving every later run to SKIP those rules.
+      - ./corej-data:/data
