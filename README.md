@@ -275,7 +275,7 @@ combination with `--remote`.
 
 - **Containers.** The `Dockerfile`, Compose file and entrypoint were wired to the monorepo layout
   (`dist/` bundle modules, the rule corpus in a sibling module) and could not build from this
-  repository. They are being reworked into their own repository.
+  repository.
 - **The rule editor.** Not part of the open-source distribution.
 
 ## Test data
