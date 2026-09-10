@@ -406,15 +406,22 @@ class CdiscValidateArgsParseTest
     }
 
 
-    @Test
-    void parse_pickleCache_longAndShortForms() throws Exception
+    private static boolean booleanField(Object args, String name) throws Exception
     {
-        org.junit.jupiter.api.Assertions.assertNull(stringField(parse("-d", "/tmp"), "pickleCache"),
-                "absent --pickle-cache leaves the field null (API path)");
-        assertEquals("/cache/dir",
-                stringField(parse("-d", "/tmp", "--pickle-cache", "/cache/dir"), "pickleCache"));
-        assertEquals("/cache/dir2",
-                stringField(parse("-d", "/tmp", "-pc", "/cache/dir2"), "pickleCache"));
+        var f = args.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        return (boolean) f.get(args);
+    }
+
+
+    @Test
+    void parse_seedCacheFromApi_defaultsOffAndParses() throws Exception
+    {
+        org.junit.jupiter.api.Assertions.assertFalse(
+                booleanField(parse("-d", "/tmp"), "seedCacheFromApi"),
+                "absent --seed-cache-from-api leaves the flag off");
+        org.junit.jupiter.api.Assertions.assertTrue(
+                booleanField(parse("-d", "/tmp", "--seed-cache-from-api"), "seedCacheFromApi"));
     }
 
 

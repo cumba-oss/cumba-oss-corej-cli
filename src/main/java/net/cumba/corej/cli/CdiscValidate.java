@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import net.cumba.cdisc.library.api.client.CdiscLibraryClient;
+import net.cumba.corej.core.CoreLibraryAccess;
 import net.cumba.corej.core.VersionInfo;
 import net.cumba.corej.core.metadata.dictionary.DictionaryConverter;
 import net.cumba.corej.core.metadata.dictionary.DictionaryDirectoryResolver;
@@ -38,11 +39,13 @@ import net.cumba.corej.core.metadata.dictionary.UniiConverter;
 import net.cumba.corej.core.metadata.dictionary.WhoDrugConverter;
 import net.cumba.corej.core.metadata.pickle.HttpArchivePickleSource;
 import net.cumba.corej.core.metadata.pickle.LocalPickleSource;
-import net.cumba.corej.core.metadata.pickle.PickleCacheSeeder;
 import net.cumba.corej.core.metadata.pickle.PickleSource;
 import net.cumba.corej.core.metadata.pickle.ProductKeyResolver;
-import net.cumba.corej.core.metadata.pickle.SeedOptions;
-import net.cumba.corej.core.metadata.pickle.SeedReport;
+import net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory;
+import net.cumba.corej.core.metadata.store.seed.PickleStoreSeeder;
+import net.cumba.corej.core.metadata.store.seed.StoreSeedOptions;
+import net.cumba.corej.core.metadata.store.seed.StoreSeedReport;
+import net.cumba.corej.core.metadata.store.seed.WebApiStoreSeeder;
 import net.cumba.corej.core.report.LibraryValidator;
 import net.cumba.corej.core.report.ReportFormat;
 import net.cumba.corej.core.report.ReportManager;
@@ -62,6 +65,7 @@ import net.cumba.corej.define.conformance.rule.RuleSet;
 import net.cumba.datatable.io.Property;
 import net.cumba.datatable.manager.IDataTableManager;
 import net.cumba.datatable.manager.local.LocalDataTableManager;
+import net.cumba.datatable.metadatacache.MetadataCacheLocator;
 import net.cumba.web.api.cache.GzipFileApiCache;
 import org.jspecify.annotations.Nullable;
 import picocli.CommandLine;
@@ -134,7 +138,7 @@ import picocli.CommandLine.ParseResult;
  *                                          remotely — the href closure is not resolved there.
  *   -t,  --threads &lt;n&gt;                    rule worker threads per dataset (default 1; max =
  *                                          available CPU cores). Values &lt; 1 error out.
- *   -ca, --cache &lt;dir&gt;                    cache dir for CDISC Library API responses
+ *   -ca, --cache &lt;file&gt;                   the unified metadata store zip
  *
  * External dictionaries (PLAN-dictionary-seeder Phase 6b):
  *        --dictionaries-dir &lt;dir&gt;         installed-dictionary store root (default:
@@ -280,7 +284,10 @@ public final class CdiscValidate
 
         /**
          * @param aCacheDir
-         *            the {@code -ca} cache directory, or {@code null} for the shared default.
+         *            an HTTP response cache directory, or {@code null} for the shared default
+         *            ({@code CDISC_API_CACHE} / {@code ~/.cdiscApiCache}). ⚠ Not {@code -ca}: that
+         *            names the unified metadata store since cache 8b-1, and production passes
+         *            {@code null} here.
          * @return the provider for this run, or {@code null} when no Library access is configured
          *         and no lookup will be attempted.
          */
@@ -356,9 +363,8 @@ public final class CdiscValidate
                 return null;
             }
             CdiscLibraryClient.CdiscBuilder client = CdiscLibraryClient.builder();
-            // Same cache resolution as the metadata-enrichment path (CoreLibraryAccessImpl):
-            // -ca dir in the Gzip format that path writes, else the shared default cache
-            // (~/.cdiscApiCache) rather than the builder's no-op fallback.
+            // An explicit dir in the Gzip format the seeding path writes, else the shared
+            // default cache (~/.cdiscApiCache) rather than the builder's no-op fallback.
             client.cache(aCacheDir != null
                     ? new GzipFileApiCache(Path.of(aCacheDir).toAbsolutePath(), ".json")
                     : CdiscLibraryClient.getCache());
@@ -460,7 +466,22 @@ public final class CdiscValidate
 
         try
         {
-            return new CdiscValidate(aDownloads, aLibrary, aArchives).run(parsed, err);
+            // The app-default store — and, for the property's other readers (ProductKeyResolver's
+            // catalogue lookup, --seed-cache), -ca too — reaches the engine through
+            // cdisc.metadata.store. ⚠ That property is the LOWEST tier of
+            // StoreMetadataProviderFactory.resolveConfiguredFile, so it cannot carry an explicit
+            // -ca past an ambient CDISC_METADATA_STORE: toParams puts -ca on the params channel
+            // (StudyValidationParams.metadataStore) for that. Restored afterwards so in-JVM
+            // callers (tests foremost) see no global drift.
+            Runnable restoreStore = applyMetadataStoreConfiguration(parsed.cache);
+            try
+            {
+                return new CdiscValidate(aDownloads, aLibrary, aArchives).run(parsed, err);
+            }
+            finally
+            {
+                restoreStore.run();
+            }
         }
         catch (UsageException e)
         {
@@ -469,6 +490,59 @@ public final class CdiscValidate
             err.println("Error: " + e.getMessage());
             return 2;
         }
+    }
+
+
+    /**
+     * Publishes the store the run should use into {@code cdisc.metadata.store}: an explicit
+     * {@code -ca} wins over the application default here; otherwise, when neither the engine's
+     * environment variable nor the system property is set, the application default
+     * ({@code ~/.cumbaDataBrowser/metadata-cache.zip}) is published — if it actually exists — so a
+     * store seeded at the default location is found with zero configuration. An explicit
+     * configuration is never overridden.
+     *
+     * <p>
+     * ⚠⚠ This is <b>not</b> what makes {@code -ca} beat an ambient {@code CDISC_METADATA_STORE}
+     * (review finding F2): the system property is the <em>lowest</em> tier of
+     * {@code StoreMetadataProviderFactory.resolveConfiguredFile}, below that environment variable.
+     * The validation run gets {@code -ca} on the explicit tier from
+     * {@link #toParams(Args, IDataTableManager, LibraryValidator.RuntimeListener)}. What still
+     * needs this publication is everything that reads the property directly and has no params of
+     * its own — {@code ProductKeyResolver}'s catalogue lookup in {@link #resolveMetadataProducts}
+     * and {@link #seedCache} — plus the zero-configuration app default, which has no other channel
+     * at all. So the two are additive; do not delete either.
+     *
+     * @param aExplicitStore
+     *            the {@code -ca} value, or {@code null}.
+     * @return the restore action undoing whatever this published; a no-op when nothing was.
+     */
+    private static Runnable applyMetadataStoreConfiguration(@Nullable String aExplicitStore)
+    {
+        String key = StoreMetadataProviderFactory.STORE_PROPERTY;
+        String target = null;
+        if (aExplicitStore != null && !aExplicitStore.isBlank())
+        {
+            target = Path.of(aExplicitStore).toAbsolutePath().toString();
+        }
+        else if (MetadataCacheLocator.configuredStore() == null)
+        {
+            Path fallback = MetadataCacheLocator.defaultStore();
+            if (Files.isRegularFile(fallback))
+            {
+                target = fallback.toString();
+            }
+        }
+        if (target == null)
+        {
+            return () ->
+            {
+                // Nothing was published; nothing to restore.
+            };
+        }
+        String previous = System.getProperty(key);
+        System.setProperty(key, target);
+        return previous == null ? () -> System.clearProperty(key)
+                : () -> System.setProperty(key, previous);
     }
 
 
@@ -994,71 +1068,139 @@ public final class CdiscValidate
 
 
     /**
-     * {@code --seed-cache} / {@code --seed-cache-from-dir}: fills the CDISC Library web-api cache
-     * from the Python engine's pickle metadata, so users without an API key get a working cache.
-     * Runs standalone and exits; no validation input is read.
+     * {@code --seed-cache} / {@code --seed-cache-from-dir} / {@code --seed-cache-from-api}:
+     * rebuilds the unified metadata store from the Python engine's pickle metadata (or, with an API
+     * key, from the live CDISC Library API), so users get a working store — plan §5.1's two
+     * seeders, one store. Runs standalone and exits; no validation input is read.
      *
      * @param aArgs
      *            the parsed arguments.
      * @param aErr
      *            the error stream for usage and failure messages.
      * @return the process exit code: 0 on success, 2 on a usage error, 1 when the seeder throws,
-     *         when the seed report carries warnings, or when the source yielded no cache entries at
-     *         all — a seeding step that produced nothing is not a successful one.
+     *         when the seed report carries warnings, or when the source yielded no metadata at all
+     *         — a seeding step that produced nothing is not a successful one.
      */
     private int seedCache(Args aArgs, PrintStream aErr)
     {
-        if (aArgs.seedCache != null && aArgs.seedCacheFromDir != null)
+        int sources = (aArgs.seedCache != null ? 1 : 0) + (aArgs.seedCacheFromDir != null ? 1 : 0)
+                + (aArgs.seedCacheFromApi ? 1 : 0);
+        if (sources > 1)
         {
-            aErr.println("Error: --seed-cache and --seed-cache-from-dir are mutually exclusive.");
+            aErr.println("Error: --seed-cache, --seed-cache-from-dir and --seed-cache-from-api "
+                    + "are mutually exclusive.");
             return 2;
         }
 
-        // Same target resolution as every other Library-backed path: -ca wins, else the
-        // CDISC_API_CACHE / cdisc.library.api.cache default (~/.cdiscApiCache).
-        Path target = aArgs.cache != null ? Path.of(aArgs.cache).toAbsolutePath()
-                : defaultApiCacheDir();
-        String baseUrl = CdiscLibraryClient.getApiUrl();
+        // Target resolution: -ca wins, else the engine's CDISC_METADATA_STORE /
+        // cdisc.metadata.store, else the app default (~/.cumbaDataBrowser/metadata-cache.zip).
+        // ⚠ Unlike a READ, the target need not exist — seeding is what creates it — so this does
+        // not go through StoreMetadataProviderFactory.resolveConfiguredFile.
+        Path target = resolveSeedTargetStore(aArgs);
+        StoreSeedOptions options = StoreSeedOptions.of(target).withRefresh(aArgs.seedOverwrite)
+                .withFetchedAt(java.time.Instant.now().toString());
 
-        try (PickleSource source = buildPickleSource(aArgs))
+        try
         {
-            SeedReport report = new PickleCacheSeeder().seed(SeedOptions
-                    .builder(source, target, baseUrl).overwriteExisting(aArgs.seedOverwrite)
-                    .dryRun(aArgs.seedDryRun).build());
+            StoreSeedReport report;
+            if (aArgs.seedCacheFromApi)
+            {
+                CoreLibraryAccess access = CoreLibraryAccess.openIfConfigured().orElse(null);
+                if (access == null)
+                {
+                    aErr.println("Error: --seed-cache-from-api needs a CDISC Library API key "
+                            + "(CDISC_API_KEY / cdisc.library.api.key). Use --seed-cache to seed "
+                            + "from the pickle archive without a key.");
+                    return 2;
+                }
+                report = runSeeder(new WebApiStoreSeeder(access)::seed, options, aArgs.seedDryRun);
+            }
+            else
+            {
+                try (PickleSource source = buildPickleSource(aArgs))
+                {
+                    report = runSeeder(new PickleStoreSeeder(source)::seed, options,
+                            aArgs.seedDryRun);
+                }
+            }
 
             String verb = aArgs.seedDryRun ? "seeding (dry run)" : "seeded";
-            LOGGER.log(System.Logger.Level.INFO, "Cache {0} at {1}: {2}", verb, target,
+            LOGGER.log(System.Logger.Level.INFO, "Metadata store {0} at {1}: {2}", verb, target,
                     report.summary());
-            // D3, the installDictionaries template: the summary, the skips and the warnings go to
-            // the operator's stream, not only to the logger, and the report decides the exit code.
-            // Until now every non-throwing seed returned 0 with its findings buried in JUL, so a
-            // CI pipeline saw a green "seed the cache" step followed by a validation run against
-            // a cache that had never been filled.
-            aErr.println("Cache " + verb + " at " + target + ": " + report.summary());
-            for (String skip : report.skipped())
+            // D3, the installDictionaries template: the summary, the misses and the warnings go
+            // to the operator's stream, not only to the logger, and the report decides the exit
+            // code — a green "seed" step must mean a filled store.
+            aErr.println("Metadata store " + verb + " at " + target + ": " + report.summary());
+            for (String missed : report.ctPackagesMissed())
             {
-                aErr.println("  skipped: " + skip);
+                aErr.println("  missing: " + missed);
             }
             for (String warning : report.warnings())
             {
                 LOGGER.log(System.Logger.Level.WARNING, "  {0}", warning);
                 aErr.println("  warning: " + warning);
             }
-            boolean nothingSeeded = report.written().isEmpty() && report.skipped().isEmpty();
+            boolean nothingSeeded = report.productsSeeded() + report.productsCarried() == 0
+                    && report.ctPackagesFetched() + report.ctPackagesCarried() == 0;
             if (nothingSeeded)
             {
-                aErr.println("Error: the seed source yielded no cache entries, so " + target
+                aErr.println("Error: the seed source yielded no metadata, so " + target
                         + " is unchanged. Check --seed-cache / --seed-ref / --seed-repo-path "
-                        + "(or --seed-cache-from-dir): the run that follows would use an empty "
-                        + "cache and reach the CDISC Library for everything.");
+                        + "(or --seed-cache-from-dir / --seed-cache-from-api): the run that "
+                        + "follows would find an empty store and skip every library-dependent "
+                        + "rule.");
             }
             return nothingSeeded || !report.warnings().isEmpty() ? 1 : 0;
         }
         catch (IOException | RuntimeException e)
         {
-            aErr.println("Error: cache seeding failed: " + e.getMessage());
-            LOGGER.log(System.Logger.Level.DEBUG, "cache seeding failed", e);
+            aErr.println("Error: metadata store seeding failed: " + e.getMessage());
+            LOGGER.log(System.Logger.Level.DEBUG, "metadata store seeding failed", e);
             return 1;
+        }
+    }
+
+    /** One store seeder's {@code seed}, as a shape {@link #runSeeder} can drive. */
+    @FunctionalInterface
+    private interface StoreSeeding
+    {
+
+        StoreSeedReport seed(StoreSeedOptions aOptions) throws IOException;
+    }
+
+    /**
+     * Runs a seeder, honouring {@code --seed-dry-run} — which the engine's seeders do not have: a
+     * dry run seeds a <b>temporary target</b> pre-loaded with a copy of the existing store (so the
+     * fetched/carried split reports exactly what a real run would do) and then discards it, leaving
+     * the real target untouched.
+     */
+    private static StoreSeedReport runSeeder(StoreSeeding aSeeding, StoreSeedOptions aOptions,
+            boolean aDryRun)
+        throws IOException
+    {
+        if (!aDryRun)
+        {
+            return aSeeding.seed(aOptions);
+        }
+        Path temp = Files.createTempFile("metadata-cache-dry-run", ".zip");
+        try
+        {
+            if (Files.isRegularFile(aOptions.target()))
+            {
+                Files.copy(aOptions.target(), temp,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            else
+            {
+                // The seeder must see an ABSENT baseline, not an empty file it would warn about.
+                Files.delete(temp);
+            }
+            return aSeeding.seed(new StoreSeedOptions(temp, aOptions.refresh(),
+                    aOptions.fetchedAt(), aOptions.provenanceOverride()));
+        }
+        finally
+        {
+            Files.deleteIfExists(temp);
         }
     }
 
@@ -1083,21 +1225,22 @@ public final class CdiscValidate
 
 
     /**
-     * The shared default web-api cache directory, matching {@code CdiscLibraryClient.getCache()}.
+     * The store file a seed run writes: {@code -ca} wins, else the engine's configured store
+     * (environment variable before system property), else the application default — which, being a
+     * target to CREATE, is used whether or not it exists yet.
      */
-    private static Path defaultApiCacheDir()
+    private static Path resolveSeedTargetStore(Args aArgs)
     {
-        // Delegate to the client's own resolver: it checks the environment variable BEFORE the
-        // system property. Re-implementing it with the opposite order would seed one directory
-        // while CdiscLibraryClient reads another, leaving the user with an apparently-empty cache
-        // and a success message.
-        String configured = CdiscLibraryClient.retrieveSystemProperty(
-                CdiscLibraryClient.ENV_CDISC_API_CACHE, CdiscLibraryClient.SP_CDISC_API_CACHE);
-        if (configured != null && !configured.isBlank())
+        if (aArgs.cache != null && !aArgs.cache.isBlank())
         {
-            return Path.of(configured).toAbsolutePath();
+            return Path.of(aArgs.cache).toAbsolutePath();
         }
-        return Path.of(System.getProperty("user.home", "."), ".cdiscApiCache").toAbsolutePath();
+        Path configured = MetadataCacheLocator.configuredStore();
+        if (configured != null)
+        {
+            return configured.toAbsolutePath();
+        }
+        return MetadataCacheLocator.defaultStore().toAbsolutePath();
     }
 
 
@@ -1334,14 +1477,16 @@ public final class CdiscValidate
         // on a typo'd path). Install mode reads the option directly (its target may not exist
         // yet); the sysprop stays the documented lowest configured tier for operators who set it
         // themselves.
-        if (args.installDictionaries && (args.seedCache != null || args.seedCacheFromDir != null))
+        if (args.installDictionaries && (args.seedCache != null || args.seedCacheFromDir != null
+                || args.seedCacheFromApi))
         {
             err.println("Error: --install-dictionaries and --seed-cache are mutually exclusive.");
             return 2;
         }
-        // Cache seeding is a standalone maintenance mode: it populates the CDISC Library web-api
-        // cache from the Python engine's pickles and exits, without touching any validation input.
-        if (args.seedCache != null || args.seedCacheFromDir != null)
+        // Cache seeding is a standalone maintenance mode: it rebuilds the unified metadata store
+        // from the Python engine's pickles (or the live CDISC Library API) and exits, without
+        // touching any validation input.
+        if (args.seedCache != null || args.seedCacheFromDir != null || args.seedCacheFromApi)
         {
             return seedCache(args, err);
         }
@@ -1494,7 +1639,16 @@ public final class CdiscValidate
     }
 
 
-    /** Maps parsed CLI arguments onto the engine-relevant service parameters. */
+    /**
+     * Maps parsed CLI arguments onto the engine-relevant service parameters.
+     *
+     * <p>
+     * ⭐ {@code -ca} lands on {@link StudyValidationParams#metadataStore()} — the explicit tier of
+     * {@code StoreMetadataProviderFactory.resolveConfiguredFile}, which outranks
+     * {@code CDISC_METADATA_STORE}. That is what makes the documented "an explicit {@code -ca}
+     * wins" true; {@link #applyMetadataStoreConfiguration} alone could not deliver it.
+     * </p>
+     */
     static StudyValidationParams toParams(Args args, IDataTableManager manager,
             LibraryValidator.RuntimeListener listener)
     {
@@ -1506,9 +1660,17 @@ public final class CdiscValidate
                 .defineVersion(args.defineVersion).includeRules(args.includeRules)
                 .excludeRules(args.excludeRules).rulesDir(args.rulesDir)
                 .rulesPackages(args.rulesPackages).rulesFiles(args.rulesFiles)
-                .datasetFilter(args.datasets).ruleThreads(args.ruleThreads).cacheDir(args.cache)
-                .pickleCacheDir(args.pickleCache).dictionariesDir(args.dictionariesDir)
-                .dictionaryVersions(args.dictionaryVersions()).runtimeListener(listener);
+                .datasetFilter(args.datasets).ruleThreads(args.ruleThreads)
+                .dictionariesDir(args.dictionariesDir).dictionaryVersions(args.dictionaryVersions())
+                // F2: -ca is the user's EXPLICIT store and travels on the params channel, the
+                // factory's top tier — above CDISC_METADATA_STORE. Publishing it only into
+                // cdisc.metadata.store (applyMetadataStoreConfiguration, which still runs: the
+                // property is what ProductKeyResolver and --seed-cache read) put it BELOW the
+                // environment variable, so an ambient store silently won. Absolutised for the
+                // same reason the property is: the engine resolves it from its own CWD.
+                .metadataStore(args.cache == null || args.cache.isBlank() ? null
+                        : Path.of(args.cache).toAbsolutePath().toString())
+                .runtimeListener(listener);
         if (args.maxErrorsPerRule != null)
         {
             builder.maxErrorsPerRule(args.maxErrorsPerRule);
@@ -1524,10 +1686,10 @@ public final class CdiscValidate
     /**
      * Resolves the {@code -mp} / {@code --metadata-products} tokens onto {@code standards/...}
      * cache keys via {@link ProductKeyResolver} (unique-suffix match against the configured product
-     * catalogue — Phase 7b: the pickle cache's keys unioned with the CDISC Library API's
-     * {@code /mdr/products} list, served from the {@code --cache} / {@code CDISC_API_CACHE}
-     * directory when cached; with no source available only full-key tokens resolve). A failed
-     * resolution is a usage error — every bad token is named at once. An omitted {@code -mp}
+     * catalogue — since cache P4 the unified metadata store's catalogue, resolved through
+     * {@code cdisc.metadata.store}, which {@code applyMetadataStoreConfiguration} has already
+     * pointed at {@code -ca} or the app default; with no store only full-key tokens resolve). A
+     * failed resolution is a usage error — every bad token is named at once. An omitted {@code -mp}
      * resolves to nothing here; the selected rule packages' <b>declared standards</b> then supply
      * the products (R7), which is why the flag is never mandatory. ⚠ Since R5 removed
      * {@code -s}/{@code -v} there is no implied default any more: a package that declares nothing
@@ -1537,8 +1699,7 @@ public final class CdiscValidate
     {
         try
         {
-            return ProductKeyResolver.resolveAllConfigured(args.metadataProducts, args.pickleCache,
-                    args.cache);
+            return ProductKeyResolver.resolveAllConfigured(args.metadataProducts, null, null);
         }
         catch (IllegalArgumentException e)
         {
@@ -1747,7 +1908,11 @@ public final class CdiscValidate
         {
             builder.versionOverride(versionOverride);
         }
-        libraryProvider = library.provider(args.cache);
+        // ⚠ null, not args.cache: since cache 8b-1 -ca names the unified metadata STORE (a zip),
+        // not an HTTP response cache directory. The define-conformance library provider still
+        // uses the CDISC Library API and resolves its own cache via CDISC_API_CACHE /
+        // cdisc.library.api.cache / ~/.cdiscApiCache.
+        libraryProvider = library.provider(null);
         if (libraryProvider != null)
         {
             builder.libraryProvider(libraryProvider);
@@ -2155,27 +2320,28 @@ public final class CdiscValidate
         out.println(
                 "  -t,  --threads <n>               rule worker threads per dataset (default 1;");
         out.println("                                   max = available CPU cores; <1 errors out)");
-        out.println("  -ca, --cache <dir>               cache dir for CDISC Library API");
+        out.println("  -ca, --cache <file>              unified metadata store zip (default:");
         out.println(
-                "  -pc, --pickle-cache <dir>        Python pickle metadata cache dir (offline;");
-        out.println(
-                "                                   SDTM/SEND and ADaM runs; skips the API when it");
-        out.println("                                   carries the run's metadata products)");
+                "                                   CDISC_METADATA_STORE / cdisc.metadata.store");
+        out.println("                                   / ~/.cumbaDataBrowser/metadata-cache.zip)");
         out.println();
-        out.println("Cache seeding (no API key required; runs standalone and exits):");
-        out.println("       --seed-cache [<repoUri>]    fill the CDISC Library web-api cache from");
+        out.println("Metadata store seeding (runs standalone and exits):");
+        out.println("       --seed-cache [<repoUri>]    rebuild the unified metadata store from");
         out.println("                                   the Python engine's pickle cache. Default");
         out.println(
                 "                                   repo: github.com/cdisc-org/cdisc-rules-engine");
         out.println("       --seed-cache-from-dir <dir> seed from an existing pickle directory");
+        out.println("       --seed-cache-from-api       seed from the live CDISC Library API");
+        out.println("                                   (needs an API key)");
         out.println("       --seed-ref <ref>            branch/tag/commit (default: HEAD branch)");
         out.println(
                 "       --seed-repo-path <path>     path in the repo (default resources/cache)");
         out.println("       --seed-archive-url-template <t>");
         out.println("                                   archive URL with {repo} / {ref}");
         out.println("       --seed-work-dir <dir>       keep extracted pickles here");
-        out.println("       --seed-overwrite            replace entries that already exist");
-        out.println("       --seed-dry-run              report without writing");
+        out.println("       --seed-overwrite            re-acquire everything, ignoring what the");
+        out.println("                                   store already holds");
+        out.println("       --seed-dry-run              report without touching the store");
         out.println();
         out.println("External dictionaries:");
         out.println("       --dictionaries-dir <dir>    installed-dictionary store (default:");
@@ -2356,18 +2522,25 @@ public final class CdiscValidate
         String cache;
 
         @Option(names = "--seed-cache", arity = "0..1", fallbackValue = "",
-                description = "Seed the CDISC Library web-api cache from the Python engine's "
+                description = "Seed the unified metadata store from the Python engine's "
                         + "pickle cache, then exit. Optional value is the repository URI "
                         + "(default: " + HttpArchivePickleSource.DEFAULT_REPO_URI + "). Writes to "
-                        + "-ca / --cache, else CDISC_API_CACHE, else ~/.cdiscApiCache.")
+                        + "-ca / --cache, else CDISC_METADATA_STORE / cdisc.metadata.store, else "
+                        + "~/.cumbaDataBrowser/metadata-cache.zip.")
         @Nullable
         String seedCache;
 
         @Option(names = "--seed-cache-from-dir",
                 description = "Seed from an existing pickle directory instead of downloading "
-                        + "(mutually exclusive with --seed-cache).")
+                        + "(mutually exclusive with the other seed sources).")
         @Nullable
         String seedCacheFromDir;
+
+        @Option(names = "--seed-cache-from-api",
+                description = "Seed from the live CDISC Library API instead of pickles — needs an "
+                        + "API key (CDISC_API_KEY / cdisc.library.api.key); mutually exclusive "
+                        + "with the other seed sources.")
+        boolean seedCacheFromApi;
 
         @Option(names = "--seed-ref",
                 description = "Branch, tag or commit to fetch; default is the repository's "
@@ -2400,17 +2573,6 @@ public final class CdiscValidate
         @Option(names = "--seed-dry-run",
                 description = "Report what seeding would write without writing anything.")
         boolean seedDryRun;
-
-        @Option(names =
-        {
-                "-pc", "--pickle-cache"
-        }, description = "Python pickle metadata cache dir (offline). Overrides "
-                + "CDISC_PICKLE_CACHE_DIR / cdisc.pickle.cache.dir. Serves SDTM-family "
-                + "(SDTMIG/SENDIG) and ADaM-family (ADaMIG, and a declared TIG ADaM leg) runs; "
-                + "when set and it carries the run's metadata products, the CDISC Library API is "
-                + "not contacted.")
-        @Nullable
-        String pickleCache;
 
         @Option(names = "--rules-dir")
         @Nullable
@@ -2977,7 +3139,8 @@ public final class CdiscValidate
             // Cache seeding and dictionary installation are standalone maintenance modes: they
             // read no study and target no standard, so the validation-input requirements below
             // do not apply to them.
-            boolean seeding = a.seedCache != null || a.seedCacheFromDir != null;
+            boolean seeding = a.seedCache != null || a.seedCacheFromDir != null
+                    || a.seedCacheFromApi;
             boolean installing = a.installDictionaries;
             if (!seeding && !installing && a.data == null && a.defineXmlPath == null)
             {

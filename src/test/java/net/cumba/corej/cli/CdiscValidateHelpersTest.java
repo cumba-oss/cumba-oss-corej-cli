@@ -401,10 +401,9 @@ class CdiscValidateHelpersTest
     {
         CdiscValidate.Args a = new CdiscValidate.Args();
         a.metadataProducts = new ArrayList<>(List.of("adam/adamig-1-3"));
-        // A real full-form key resolves whatever the catalogue holds: with the API cache
-        // configured (Phase 7b) it matches the catalogue key; with no source at all it passes
-        // verbatim in full-key form. Either way the resolved key is identical.
-        a.pickleCache = emptyDir.toString();
+        // A real full-form key resolves whatever the catalogue holds: with a metadata store
+        // configured it matches the catalogue key; with no store at all it passes verbatim in
+        // full-key form. Either way the resolved key is identical.
         assertEquals(List.of("standards/adam/adamig-1-3"), resolveMetadataProducts(a));
     }
 
@@ -415,11 +414,9 @@ class CdiscValidateHelpersTest
         throws Exception
     {
         CdiscValidate.Args a = new CdiscValidate.Args();
-        // ⚠ Phase 7b superseded "no pickle cache => full-key tokens only": a bare token of a real
-        // product may now resolve through the API-side catalogue (CDISC_API_CACHE). A token no
-        // source publishes stays a usage error in every configuration.
+        // A token no source publishes stays a usage error in every configuration — with or
+        // without a metadata store supplying the catalogue.
         a.metadataProducts = new ArrayList<>(List.of("adamig-9-9"));
-        a.pickleCache = emptyDir.toString();
         java.lang.reflect.InvocationTargetException ite = org.junit.jupiter.api.Assertions
                 .assertThrows(java.lang.reflect.InvocationTargetException.class,
                         () -> resolveMetadataProducts(a));
@@ -445,38 +442,48 @@ class CdiscValidateHelpersTest
 
 
     /**
-     * Branch-sensitive resolution proof (review finding F3b): the token below is a <b>bare</b>
-     * product id whose resolved form ({@code standards/zzz/zzztestig-9-9}) differs from its
-     * verbatim form, and the key it must resolve to exists <b>only</b> in the pickle catalogue
-     * fabricated into the temp dir - the CDISC Library API union cannot supply it, and the
-     * empty-catalogue verbatim-passthrough branch cannot resolve a bare token at all. If the
-     * catalogue returned empty unconditionally, this test fails with a usage error instead of
-     * resolving.
+     * Branch-sensitive resolution proof (review finding F3b, re-based onto the store): the token
+     * below is a <b>bare</b> product id whose resolved form ({@code standards/zzz/zzztestig-9-9})
+     * differs from its verbatim form, and the key it must resolve to exists <b>only</b> in the
+     * metadata store fabricated into the temp dir — the empty-catalogue verbatim-passthrough branch
+     * cannot resolve a bare token at all. If the catalogue returned empty unconditionally, this
+     * test fails with a usage error instead of resolving.
      */
     @Test
     void resolveMetadataProducts_bareTokenResolvesThroughTheCatalogue_notVerbatim(
             @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
         throws Exception
     {
-        writeStandardsPickle(dir, "standards/zzz/zzztestig-9-9", "standards/zzz/zzzotherig-1-0");
+        java.nio.file.Path store = dir.resolve("metadata-cache.zip");
+        new net.cumba.corej.core.metadata.store.MetadataStoreWriter().publishedCtPackages(List.of())
+                .productCatalogue(
+                        List.of("standards/zzz/zzztestig-9-9", "standards/zzz/zzzotherig-1-0"))
+                .write(store);
         CdiscValidate.Args a = new CdiscValidate.Args();
         a.metadataProducts = new ArrayList<>(List.of("zzztestig-9-9"));
-        a.pickleCache = dir.toString();
-        assertEquals(List.of("standards/zzz/zzztestig-9-9"), resolveMetadataProducts(a));
-    }
-
-
-    /** Writes a {@code standards_details.pkl} holding the given keys, pickled as Python would. */
-    private static void writeStandardsPickle(java.nio.file.Path dir, String... keys)
-        throws java.io.IOException
-    {
-        Map<String, Object> standards = new LinkedHashMap<>();
-        for (String key : keys)
+        String saved = System.getProperty(
+                net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY);
+        try
         {
-            standards.put(key, Map.of());
+            System.setProperty(
+                    net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY,
+                    store.toString());
+            assertEquals(List.of("standards/zzz/zzztestig-9-9"), resolveMetadataProducts(a));
         }
-        java.nio.file.Files.write(dir.resolve("standards_details.pkl"),
-                new net.razorvine.pickle.Pickler().dumps(standards));
+        finally
+        {
+            if (saved == null)
+            {
+                System.clearProperty(
+                        net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY);
+            }
+            else
+            {
+                System.setProperty(
+                        net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY,
+                        saved);
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -499,8 +506,7 @@ class CdiscValidateHelpersTest
     {
         CdiscValidate.Args a = new CdiscValidate.Args();
         a.data = "/tmp";
-        a.pickleCache = emptyPickleDir.toString();
-        // Full-form tokens resolve in every catalogue configuration (verbatim with no source,
+        // Full-form tokens resolve in every catalogue configuration (verbatim with no store,
         // identically via the catalogue) - this test pins the WIRING, the catalogue-branch
         // test above pins the resolution.
         a.metadataProducts = new ArrayList<>(List.of("adam/adam-occds-1-1", "adam/adamig-1-3"));
@@ -510,6 +516,70 @@ class CdiscValidateHelpersTest
         assertEquals(List.of("standards/adam/adam-occds-1-1", "standards/adam/adamig-1-3"),
                 p.metadataProducts(),
                 "declared -mp products must reach StudyValidationParams, resolved, in order");
+    }
+
+    // ------------------------------------------------------------------
+    // F2: an explicitly named -ca store must outrank an ambient one
+    // ------------------------------------------------------------------
+
+
+    /**
+     * Review finding F2 (second half): {@code -ca} used to reach the engine <b>only</b> through the
+     * {@code cdisc.metadata.store} system property, which
+     * {@link net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory#resolveConfiguredFile}
+     * ranks <b>below</b> {@code CDISC_METADATA_STORE} — so an ambient environment variable silently
+     * overrode the store the user named, while {@code --help} and the {@code toParams} javadoc both
+     * promise the opposite. The fix routes {@code -ca} onto
+     * {@code StudyValidationParams.metadataStore()}, the factory's explicit top tier.
+     *
+     * <p>
+     * ⚠ The ambient store configured here is the <b>system property</b>, not the environment
+     * variable: a JVM cannot set its own environment, so the property is the only ambient tier a
+     * test can install. It sits one rank <em>below</em> the environment variable, so losing to it
+     * before the fix implies losing to {@code CDISC_METADATA_STORE} a fortiori — proving the weaker
+     * case proves the reported one. (Same argument as the engine-side test in {@code cumba-corej}.)
+     * </p>
+     */
+    @Test
+    void toParams_explicitCacheOutranksAnAmbientStore(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+        throws Exception
+    {
+        java.nio.file.Path ambient = dir.resolve("ambient-store.zip");
+        java.nio.file.Path named = dir.resolve("named-store.zip");
+        new net.cumba.corej.core.metadata.store.MetadataStoreWriter().publishedCtPackages(List.of())
+                .productCatalogue(List.of()).write(ambient);
+        new net.cumba.corej.core.metadata.store.MetadataStoreWriter().publishedCtPackages(List.of())
+                .productCatalogue(List.of()).write(named);
+
+        CdiscValidate.Args a = new CdiscValidate.Args();
+        a.data = "/tmp";
+        a.cache = named.toString();
+
+        String key = net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY;
+        String saved = System.getProperty(key);
+        try
+        {
+            System.setProperty(key, ambient.toString());
+            net.cumba.corej.core.run.StudyValidationParams p = toParams(a);
+            // The engine resolves the run's store through exactly this call; asserting on it
+            // rather than on the raw field pins the PRECEDENCE, not just the plumbing.
+            assertEquals(named.toAbsolutePath(),
+                    net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory
+                            .resolveConfiguredFile(p.metadataStore()),
+                    "the store named by -ca must outrank an ambient one");
+        }
+        finally
+        {
+            if (saved == null)
+            {
+                System.clearProperty(key);
+            }
+            else
+            {
+                System.setProperty(key, saved);
+            }
+        }
     }
 
 

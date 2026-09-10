@@ -7,10 +7,10 @@
 #
 #   docker compose build                         # build the image from source
 #   docker compose run --rm cli --help           # show CLI usage
-#   docker compose run --rm cli --seed-cache     # seed the CDISC Library API cache —
-#                                                # ONCE, onto ./corej-data/api-cache;
-#                                                # without it every rule needing CDISC
-#                                                # Library metadata SKIPs (the run says so)
+#   docker compose run --rm cli --seed-cache     # seed the CDISC metadata store — ONCE,
+#                                                # onto ./corej-data/metadata; without it
+#                                                # every rule needing CDISC Library
+#                                                # metadata SKIPs (the run says so)
 #   docker compose run --rm cli \                # install dictionaries — ONCE, onto
 #       --install-dictionaries                   # ./corej-data/dictionaries; without them
 #                                                # every dictionary rule SKIPs
@@ -51,17 +51,25 @@ services:
       #     ./corej-data/rules-define, which -vx needs. ---
       COREJ_RULES_DIR: "${COREJ_RULES_DIR:-/data/rules}"
       COREJ_DEFINE_RULES_DIR: "${COREJ_DEFINE_RULES_DIR:-/data/rules-define}"
-      # --- the CDISC Library web-API cache and the external-dictionary store, both
-      #     moved onto the ./corej-data bind mount so ONE mount holds everything and
-      #     it is all browsable on the host. The image's own defaults sit under /app
-      #     (see the Dockerfile) because a bare `docker run -v "$PWD":/data` mounts
-      #     the caller's own working directory; here /data is a directory that
-      #     exists to serve this stack, so there is nothing to pollute.
-      #     ⚠⚠ Both go in a SUBDIRECTORY, never at /data directly. `-d <dir>` stages
-      #     every REGULAR FILE it lists, with no extension filter, so a loose cache
-      #     file at /data would be uploaded as a study dataset by `-d /data`.
-      #     Directories are skipped, which is why these are safe where they are.
+      # --- the unified CDISC metadata store, the CDISC Library web-API cache and
+      #     the external-dictionary store, all moved onto the ./corej-data bind
+      #     mount so ONE mount holds everything and it is all browsable on the host.
+      #     The image's own defaults sit under /app (see the Dockerfile) because a
+      #     bare `docker run -v "$PWD":/data` mounts the caller's own working
+      #     directory; here /data is a directory that exists to serve this stack, so
+      #     there is nothing to pollute.
+      #     ⚠⚠ All three go in a SUBDIRECTORY, never at /data directly. `-d <dir>`
+      #     stages every REGULAR FILE it lists, with no extension filter, so a loose
+      #     metadata-cache.zip at /data would be uploaded as a study dataset by
+      #     `-d /data`. Directories are skipped, which is why these are safe where
+      #     they are — and it is why the store is /data/metadata/metadata-cache.zip
+      #     rather than /data/metadata-cache.zip.
+      #     ⚠ The store is a single zip FILE; only its parent directory is ever
+      #     created for it. An empty file is a regular file, so the engine would
+      #     accept it as configured and then fail opening a malformed archive
+      #     instead of degrading to the loud per-rule SKIP.
       #     -ca / --cache on the command line still outranks the env setting. ---
+      CDISC_METADATA_STORE: "${CDISC_METADATA_STORE:-/data/metadata/metadata-cache.zip}"
       CDISC_API_CACHE: "${CDISC_API_CACHE:-/data/api-cache}"
       COREJ_DICTIONARIES_DIR: "${COREJ_DICTIONARIES_DIR:-/data/dictionaries}"
       # --- extra JVM options, e.g. -Xmx2g (auto-applied by the JVM) ---
@@ -70,9 +78,9 @@ services:
       # Host bind mount: studies + report output are browsable at the repo-root
       # ./corej-data. Must be owned by uid 1000 — see the header comment.
       # ONE mount, holding everything that must outlive a `run --rm` container:
-      # the study and its report, plus api-cache/ and dictionaries/ (the env above)
-      # and the rules-define/ the entrypoint seeds here. All of it visible and
-      # manageable on the host — a named volume would hide it under
+      # the study and its report, plus metadata/, api-cache/ and dictionaries/ (the
+      # env above) and the rules-define/ the entrypoint seeds here. All of it
+      # visible and manageable on the host — a named volume would hide it under
       # /var/lib/docker and need `docker volume rm` to reset.
       # ⚠ Without this, /app paths are IMAGE LAYERS: `run --rm cli --seed-cache`
       # and `--install-dictionaries` would each report success and lose everything

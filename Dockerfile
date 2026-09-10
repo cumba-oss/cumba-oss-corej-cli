@@ -12,6 +12,11 @@
 #       cumba-oss-corej-cli:local -rp cdisc-sdtmig-3-4 -d /data/datasets \
 #       -o /data/CORE-Report.json
 #
+# ⚠ Nor is the CDISC metadata store. Seed it ONCE onto a volume you keep; without
+# it every rule needing CDISC Library metadata SKIPs, and the run says so up front:
+#   docker run --rm -v corej-metadata:/app/metadata cumba-oss-corej-cli:local \
+#       --seed-cache
+#
 # ⚠⚠ The build context is THIS REPOSITORY — `docker build .` from here, and
 # docker-compose.yml sets `context: .`. The repository is flat and single-module,
 # so it builds itself, and the .dockerignore beside this file governs the context.
@@ -91,8 +96,8 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 # directory, and creating store directories in there would be rude. Mount what you
 # want to keep:
 #   docker run --rm -v corej-rules:/app/rules -v corej-dicts:/app/dictionaries \
-#              -v corej-api-cache:/app/api-cache …
-# The compose stack instead points all four at subdirectories of its own
+#              -v corej-metadata:/app/metadata -v corej-api-cache:/app/api-cache …
+# The compose stack instead points all five at subdirectories of its own
 # ./corej-data bind mount, where there is nothing to pollute.
 #
 # Precedence comes from the bundle's .conf: COREJ_* environment > -D system
@@ -120,21 +125,44 @@ ENV COREJ_DEFINE_RULES_DIR=/app/rules-define
 # ⚠ Configured-but-missing throws.
 ENV COREJ_DICTIONARIES_DIR=/app/dictionaries
 
-# The CDISC Library web-API cache — a DIRECTORY of cached API responses that
-# `--seed-cache` fills and every later run reads.
-# ⚠⚠ Without this ENV the client's own default applies, ~/.cdiscApiCache, and the
-# user created above has --home-dir /app: that resolves to /app/.cdiscApiCache, an
+# The unified CDISC metadata store — one zip FILE holding the projected CDISC
+# Library/model metadata the engine reads during a run. `--seed-cache`,
+# `--seed-cache-from-dir` and `--seed-cache-from-api` build it; every later run
+# reads it. Same rationale as the dictionary store above, and deliberately NOT
+# under /data for the same reason: /data is the caller's bind mount for the study
+# under validation.
+# ⚠⚠ Without this ENV the engine's own default applies —
+# ~/.cumbaDataBrowser/metadata-cache.zip — and the user created above has
+# --home-dir /app, so that is /app/.cumbaDataBrowser/metadata-cache.zip: an
 # IMAGE-LAYER path in a container that runs once and exits. A `--seed-cache` run
 # would write it and lose it on exit, silently, and every later run would still
-# find an empty cache. Seed onto a volume instead:
-#   docker run --rm -v corej-api-cache:/app/api-cache <image> --seed-cache
-# `-ca` / `--cache` on the command line still outranks this.
+# find no store. Point it at a directory an operator can mount instead:
+#   docker run --rm -v corej-metadata:/app/metadata <image> --seed-cache
+#   docker run --rm -v corej-metadata:/app/metadata -v "$PWD":/data <image> …
+# Unmounted, the store is simply absent and every library-dependent rule SKIPs,
+# loudly and by name. `-ca` / `--cache` on the command line still outranks this,
+# so a caller naming their own store is unaffected.
+# ⚠ The FILE is never created here, only its directory: an empty file is a regular
+# file, so the engine would accept it as configured and then fail opening a
+# malformed archive instead of degrading cleanly.
+ENV CDISC_METADATA_STORE=/app/metadata/metadata-cache.zip
+
+# The CDISC Library web-API cache — a DIRECTORY of cached HTTP responses. ⚠ It is
+# NOT the metadata store above and `--seed-cache` does not fill it: since the
+# engine's pickle read leg was retired, the only path that reads this cache is the
+# Define-XML conformance run (`-vx` in local mode), which calls the live CDISC
+# Library and caches the responses here.
+# ⚠⚠ Without this ENV the client's own default applies, ~/.cdiscApiCache, which
+# with --home-dir /app resolves to /app/.cdiscApiCache — an IMAGE-LAYER path in a
+# container that runs once and exits, so every `-vx` run would re-fetch from the
+# network. Mount it to keep it:
+#   docker run --rm -v corej-api-cache:/app/api-cache <image> -vx …
 ENV CDISC_API_CACHE=/app/api-cache
 
 # /data is the conventional mount point for the study under validation and for the
 # report output: CWD-relative inputs/outputs (the default CORE-Report-<ts>.json and
 # its runtime CSV) land here, on the caller's bind mount.
-RUN mkdir -p /data /app/rules /app/rules-define /app/dictionaries /app/api-cache \
+RUN mkdir -p /data /app/rules /app/rules-define /app/dictionaries /app/api-cache /app/metadata \
  && chmod +x /app/dist/run.sh /app/docker-entrypoint.sh \
  && chown -R corej:corej /app /data
 

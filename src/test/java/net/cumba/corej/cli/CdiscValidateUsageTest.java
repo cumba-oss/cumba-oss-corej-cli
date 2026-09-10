@@ -62,11 +62,14 @@ class CdiscValidateUsageTest
             "or define.xml directly); repeatable. Use to",
             "provide SDTM data when validating ADaM.", "-t,  --threads <n>",
             "rule worker threads per dataset (default 1;",
-            "max = available CPU cores; <1 errors out)", "-ca, --cache <dir>",
-            "cache dir for CDISC Library API", "-pc, --pickle-cache <dir>",
-            "Python pickle metadata cache dir (offline;",
-            "SDTM/SEND and ADaM runs; skips the API when it",
-            "carries the run's metadata products)", "External dictionaries:",
+            "max = available CPU cores; <1 errors out)", "-ca, --cache <file>",
+            "unified metadata store zip (default:", "CDISC_METADATA_STORE / cdisc.metadata.store",
+            "/ ~/.cumbaDataBrowser/metadata-cache.zip)",
+            "Metadata store seeding (runs standalone and exits):", "--seed-cache [<repoUri>]",
+            "rebuild the unified metadata store from", "--seed-cache-from-dir <dir>",
+            "--seed-cache-from-api", "(needs an API key)", "--seed-overwrite",
+            "re-acquire everything, ignoring what the", "store already holds", "--seed-dry-run",
+            "report without touching the store", "External dictionaries:",
             "--dictionaries-dir <dir>", "installed-dictionary store (default:",
             "--snomed-version-select <v>", "--install-dictionaries", "--set-default",
             "--skip-installed", "--dry-run", "Java-only extras:", "--rules-dir <dir>",
@@ -125,11 +128,14 @@ class CdiscValidateUsageTest
             "or define.xml directly); repeatable. Use to",
             "provide SDTM data when validating ADaM.", "-t,  --threads <n>",
             "rule worker threads per dataset (default 1;",
-            "max = available CPU cores; <1 errors out)", "-ca, --cache <dir>",
-            "cache dir for CDISC Library API", "-pc, --pickle-cache <dir>",
-            "Python pickle metadata cache dir (offline;",
-            "SDTM/SEND and ADaM runs; skips the API when it",
-            "carries the run's metadata products)", "External dictionaries:",
+            "max = available CPU cores; <1 errors out)", "-ca, --cache <file>",
+            "unified metadata store zip (default:", "CDISC_METADATA_STORE / cdisc.metadata.store",
+            "/ ~/.cumbaDataBrowser/metadata-cache.zip)",
+            "Metadata store seeding (runs standalone and exits):", "--seed-cache [<repoUri>]",
+            "rebuild the unified metadata store from", "--seed-cache-from-dir <dir>",
+            "--seed-cache-from-api", "(needs an API key)", "--seed-overwrite",
+            "re-acquire everything, ignoring what the", "store already holds", "--seed-dry-run",
+            "report without touching the store", "External dictionaries:",
             "--dictionaries-dir <dir>", "installed-dictionary store (default:",
             "--snomed-version-select <v>", "--install-dictionaries", "--set-default",
             "--skip-installed", "--dry-run", "Java-only extras:", "--rules-dir <dir>",
@@ -204,7 +210,10 @@ class CdiscValidateUsageTest
         // banner's "<= 0 = unlimited" with a two-line wording that also states the rejection —
         // the guard at Args.parse rejects a negative cap, so the printed contract had to stop
         // promising that one works.
-        assertEquals(137, lineCount, "help banner line count changed: " + lineCount);
+        // 139 since cache 8b-1 re-pointed -ca at the unified metadata store (1 line -> 3, the
+        // cascade), retired the 4-line -pc block, and grew the seeding block: --seed-cache-from-api
+        // (+2 lines) and a two-line --seed-overwrite wording for refresh semantics (+1).
+        assertEquals(139, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();

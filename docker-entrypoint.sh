@@ -1,9 +1,12 @@
 #!/bin/sh
 # Entrypoint for the coreJ CDISC CLI image.
 #
-# It prepares the four on-disk stores the engine resolves for itself, says once and
-# up front which of them are empty, and then execs the launcher (so `java` replaces
-# this shell and stays PID 1; args flow through to CdiscValidate).
+# It prepares the five on-disk stores the engine resolves for itself, says once and
+# up front which of them are empty or absent, and then execs the launcher (so `java`
+# replaces this shell and stays PID 1; args flow through to CdiscValidate).
+#
+# It also pins the unified CDISC metadata store onto a mountable path and says so
+# once when none is present — see the block below. It never seeds it.
 #
 # ⚠⚠ THIS IMAGE SHIPS NO RULES AND NO DICTIONARIES. The corpora are released on
 # their own cadence by cumba-oss-corej-rules and are not Maven dependencies, so the
@@ -13,12 +16,18 @@
 # mount recipes.
 #
 # ⚠⚠ Empty and missing are NOT the same to the engine. "Configured but missing" is
-# a hard error for two of the three: the dictionary store throws when a validation
-# run sets up, and the Define-XML corpus throws on every local-mode -vx run. Only
-# rules/ treats missing and empty alike. So every block below guarantees the
-# directory EXISTS, falling back to the bundle's own empty copy when it cannot
-# create the configured one. An empty store degrades to a loud per-rule SKIP; a
-# missing one throws.
+# a hard error for two of the corpora: the dictionary store throws when a validation
+# run sets up, and the Define-XML corpus throws on every local-mode -vx run. rules/
+# treats missing and empty alike. So each of those blocks guarantees the directory
+# EXISTS, falling back to the bundle's own empty copy when it cannot create the
+# configured one. An empty store degrades to a loud per-rule SKIP; a missing one
+# throws.
+#
+# ⚠⚠ The metadata store is the exception, and it inverts: it is a single zip FILE,
+# an ABSENT one degrades cleanly to the per-rule SKIP, and an empty one does not
+# exist as a concept — an empty file is a regular file the engine accepts as
+# configured and then fails to open as an archive. So only its parent directory is
+# ever created, never the file itself.
 #
 # Robustness: nothing here ever aborts the container. A read-only or foreign-owned
 # mount produces a warning and a fallback. Runs that touch none of this (`--help`)
@@ -72,7 +81,40 @@ else
 fi
 
 # ------------------------------------------------------------------
+# The unified CDISC metadata store.
+#
+# The Dockerfile sets CDISC_METADATA_STORE to /app/metadata/metadata-cache.zip so
+# it lands on a directory an operator can mount, NOT on the engine's own default
+# ~/.cumbaDataBrowser/metadata-cache.zip — which, with this image's
+# `useradd --home-dir /app`, is an image-layer path inside a container that runs
+# once and exits. Re-defaulted here as well so a `docker run` against a stripped
+# environment behaves the same, and exported so the JVM sees it either way.
+#
+# ⚠⚠ Only the PARENT DIRECTORY is created, never the file: an empty file is a
+# regular file, so the engine accepts it as configured and then fails opening a
+# malformed archive, instead of degrading to "no store configured" and the loud
+# per-rule SKIP.
+# ⚠ Best-effort, like every other step here — a read-only or foreign-owned mount
+# must warn, never abort the container.
+# ⛔ No seeding is done here. Seeding is an explicit --seed-cache* run: it does
+# outbound network I/O and takes minutes, which is not something a one-shot
+# validation container may do on the caller's behalf.
+# ------------------------------------------------------------------
+STORE="${CDISC_METADATA_STORE:-/app/metadata/metadata-cache.zip}"
+export CDISC_METADATA_STORE="$STORE"
+if mkdir -p "$(dirname "$STORE")" 2>/dev/null; then :; else
+    echo "warning: cannot create $(dirname "$STORE") for the CDISC metadata store;" \
+        "a --seed-cache run will fail there and validation will SKIP the rules that" \
+        "need CDISC Library metadata" >&2
+fi
+
+# ------------------------------------------------------------------
 # The CDISC Library web-API cache.
+#
+# ⚠ NOT the metadata store above. Since the engine's pickle read leg was retired
+# the only path that reads this directory is a Define-XML conformance run (-vx in
+# local mode), which calls the live CDISC Library and caches the responses here;
+# --seed-cache does not fill it and -ca does not name it.
 #
 # The Dockerfile sets CDISC_API_CACHE to /app/api-cache so it lands on a directory
 # an operator can mount, NOT on the client's own default ~/.cdiscApiCache — which,
@@ -80,17 +122,12 @@ fi
 # container that runs once and exits. Re-defaulted here as well so a `docker run`
 # against a stripped environment behaves the same, and exported so the JVM sees it
 # either way.
-#
-# ⛔ No seeding is done here. Seeding is an explicit --seed-cache run: it does
-# outbound network I/O and takes minutes, which is not something a one-shot
-# validation container may do on the caller's behalf.
 # ------------------------------------------------------------------
 API_CACHE="${CDISC_API_CACHE:-/app/api-cache}"
 export CDISC_API_CACHE="$API_CACHE"
 if mkdir -p "$API_CACHE" 2>/dev/null; then :; else
     echo "warning: cannot create $API_CACHE for the CDISC Library API cache;" \
-        "a --seed-cache run will fail there and validation will SKIP the rules that" \
-        "need CDISC Library metadata" >&2
+        "a -vx run will re-fetch every Library response it needs from the network" >&2
 fi
 
 # ------------------------------------------------------------------
@@ -137,7 +174,7 @@ fi
 # recommended), and when they named a location of their own on the command line —
 # our path is then not what the run reads, so the notice would be actively wrong.
 run_autofill=1
-announce_cache=1
+announce_store=1
 announce_rules=1
 for arg in "$@"; do
     case "$arg" in
@@ -145,9 +182,15 @@ for arg in "$@"; do
         run_autofill=0
         ;;
     esac
+    # The metadata-store notice further down reports a MISSING store. Stay quiet
+    # when the caller only wants usage or is installing dictionaries (neither run
+    # reads the store), when they are seeding it right now (the seed is the fix
+    # being recommended), and when -ca / --cache names a store of their own —
+    # $STORE is then not the file the run will read, so the notice would be
+    # actively wrong. Whole-token matching, for the reason given above.
     case "$arg" in
     -h|--help|--install-dictionaries|--seed-cache*|-ca|--cache|--cache=*)
-        announce_cache=0
+        announce_store=0
         ;;
     esac
     case "$arg" in
@@ -207,17 +250,16 @@ if [ "$announce_rules" = "1" ] && [ ! -f "$COREJ_RULES_DIR/packages.json" ]; the
     echo "or point --rules-dir / COREJ_RULES_DIR at wherever you unpacked it." >&2
 fi
 
-# The same surface for the CDISC Library API cache. Without it a run silently
-# skips every rule needing CDISC Library metadata, and in a one-shot container
-# there is nothing left afterwards to inspect and work out why.
-if [ "$announce_cache" = "1" ] \
-    && ! find "$CDISC_API_CACHE" -type f 2>/dev/null | grep -q .; then
-    echo "notice: the CDISC Library API cache at $CDISC_API_CACHE is empty — every rule" \
-        "needing CDISC Library metadata will SKIP (loudly, by name). Seed it once onto a" \
-        "volume you keep, then reuse that volume on later runs:" >&2
-    echo "    docker run --rm -v corej-api-cache:/app/api-cache <this-image> --seed-cache" >&2
-    echo "Set CDISC_API_KEY to seed from the live CDISC Library, or name your own cache" \
-        "directory with -ca <dir>." >&2
+# The same surface for the unified CDISC metadata store. Without one a run
+# silently skips every rule needing CDISC Library metadata, and in a one-shot
+# container there is nothing left afterwards to inspect and work out why.
+if [ "$announce_store" = "1" ] && [ ! -f "$STORE" ]; then
+    echo "notice: no CDISC metadata store at $STORE — every rule needing CDISC Library" \
+        "metadata will SKIP (loudly, by name). Seed it once onto a volume you keep, then" \
+        "reuse that volume on later runs:" >&2
+    echo "    docker run --rm -v corej-metadata:/app/metadata <this-image> --seed-cache" >&2
+    echo "Add --seed-cache-from-api plus CDISC_API_KEY to seed from the live CDISC Library" \
+        "instead of the published pickle metadata, or name your own store with -ca <file>." >&2
 fi
 
 exec /app/dist/run.sh "$@"

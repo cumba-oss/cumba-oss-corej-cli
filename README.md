@@ -260,12 +260,22 @@ mv cumba-oss-corej-rules-<version>/rules/* cumba-oss-corej-cli-<version>/rules/
 
 ### CDISC Library access
 
-Metadata resolution normally calls the CDISC Library, authenticated with the `CDISC_API_KEY`
-environment variable or `-Dcdisc.library.api.key`. Two offline routes avoid it:
+A run reads its CDISC metadata from the **unified metadata store**, a single zip file resolved as
+`-ca` / `--cache` &gt; `CDISC_METADATA_STORE` &gt; `-Dcdisc.metadata.store` &gt;
+`~/.cumbaDataBrowser/metadata-cache.zip`. With no store, every rule needing CDISC Library metadata
+SKIPs — loudly, by name. Three seeding modes build it, each running standalone and exiting:
 
-- `--seed-cache` fills the web-api cache from the Python engine's pickle metadata. It **needs no
-  API key**, runs standalone and exits.
-- `-pc` / `--pickle-cache` reads an existing pickle metadata directory directly (SDTM only).
+- `--seed-cache [<repoUri>]` seeds from the Python engine's published pickle metadata. It **needs
+  no API key**.
+- `--seed-cache-from-dir <dir>` seeds from an existing pickle directory you already have.
+- `--seed-cache-from-api` seeds from the live CDISC Library API, and does need `CDISC_API_KEY`.
+
+`--seed-overwrite` re-acquires everything instead of carrying forward what the store already
+holds; `--seed-dry-run` reports what a run would change without touching it.
+
+⚠ `CDISC_API_CACHE` is a different thing and is **not** the store: it is an HTTP response cache
+for the Define-XML conformance run (`-vx` in local mode), the one path that still calls the
+Library directly.
 
 `--install-dictionaries` populates the dictionary store and exits; with no inputs it downloads the
 credential-free MED-RT, UNII and neoplasm sets. It is a local maintenance mode and is rejected in
@@ -284,8 +294,22 @@ docker compose run --rm cli -rp cdisc-sdtmig-3-4 -d /data/datasets -o /data/CORE
 
 The build stage runs one `mvn -B -DskipTests package` and unpacks the dist zip; the runtime stage
 is a JRE over that bundle, running as uid 1000. Compose bind-mounts `./corej-data` at `/data`, so
-the study, its report, the dictionary store and the seeded CDISC Library API cache all stay on the
-host — `mkdir -p corej-data && sudo chown -R 1000:1000 corej-data` once, first.
+the study, its report, the dictionary store, the seeded metadata store and the CDISC Library API
+cache all stay on the host — `mkdir -p corej-data && sudo chown -R 1000:1000 corej-data` once,
+first.
+
+⚠ **The image bakes no metadata store either**, and the engine's default
+`~/.cumbaDataBrowser/metadata-cache.zip` is an image-layer path there (the image user's home is
+`/app`). Both the Dockerfile and the entrypoint therefore point `CDISC_METADATA_STORE` at a
+mountable path, and the entrypoint says so once, up front, when no store is present. Seed it once:
+
+```sh
+docker compose run --rm cli --seed-cache
+```
+
+⚠ The store lives in a **subdirectory** of the mount (`/data/metadata/metadata-cache.zip`), never
+at `/data` itself: `-d <dir>` stages every regular file it lists with no extension filter, so a
+loose store file at the mount root would be uploaded as a study dataset.
 
 ⚠ **The image bakes no rule corpus.** The corpora are released separately by
 `cumba-oss-corej-rules` and are not Maven dependencies. Unpack the release assets into
