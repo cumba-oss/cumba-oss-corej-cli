@@ -246,7 +246,7 @@ it is a DRAFT. Release `v0.3.1` does ship all 15 `rules-draft-*` packages: parke
 selected for you, and not a basis for a submission. See `src/main/dist/rules/README.md`.
 
 ⚠⚠ **Bumping the corpus is a five-repo change** — this repo, `cumba-oss-corej-rest`, their two
-internal twins and `cumba-data-browser` all pin `dependency.corej-rules.tag` and the two hashes,
+internal twins and `cumba-databrowser` all pin `dependency.corej-rules.tag` and the two hashes,
 and `databrowser-meta/check_versions.sh` asserts they agree. Bump the tag, the version and **both**
 hashes together, and re-measure `corej.rules.draft-packages`.
 

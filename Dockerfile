@@ -87,7 +87,7 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 # which is COPYed above. They are still not Maven artifacts and are still released
 # on their own cadence — the pin is what reconciles the two, and bumping it is a
 # five-repo change (this repo, cumba-oss-corej-rest, their two internal twins and
-# cumba-data-browser).
+# cumba-databrowser).
 #
 # ⚠ Dictionaries remain the operator's to install: those sets are licensed
 # separately and are never redistributed here.
