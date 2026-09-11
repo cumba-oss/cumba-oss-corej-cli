@@ -245,7 +245,9 @@ jobs:
       #
       # `mvn package` builds the distribution zip, but a zip that assembles green can
       # still be unrunnable — an empty lib/, an assembly declared before the jar
-      # plugin, an unresolvable ${...} in the sidecar .conf. None of that fails the
+      # plugin, an unresolvable ${...} in the sidecar .conf, or (since 2026-09-11) a
+      # rules/ that staged nothing because the corpus fileSet points through a
+      # version-bearing directory. None of that fails the
       # build. This is what caught the class of bug the bundle exists to fix; see the
       # header of src/test/smoke.sh for why it drives a real run rather than --help.
       #

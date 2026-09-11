@@ -134,7 +134,9 @@ cumba-oss-corej-cli-<version>/
 ├── cumba-oss-corej-cli.jar     the cumba-oss-bootstrap launcher
 ├── cumba-oss-corej-cli.conf    its configuration — edit freely, no rebuild
 ├── run.sh   run.bat
-├── rules/  rules-define/  dictionaries/    ship empty; each has a README
+├── rules/                      the pinned rule corpus (47 packages)
+├── rules-define/               the pinned Define-XML corpus (4 packages)
+├── dictionaries/               empty; ./run.sh installs into it
 └── lib/                        the application jar and every dependency
 ```
 
@@ -224,13 +226,50 @@ and the report is written to `-o` as usual. `--remote-user` / `--remote-password
 `--remote-token` carry the credentials (`--remote-token` wins when both are set); each has a
 `-Dcorej.remote.*` system-property equivalent.
 
-## ⚠ The rule corpus is not in this repository
+## ⭐ The rule corpus is bundled
 
-The engine needs a **rule corpus on disk at runtime**. It is not a Maven dependency and is not
-vendored here — it is released separately, as signed archives, from
-[cumba-oss-corej-rules](https://github.com/cumba-oss/cumba-oss-corej-rules):
-`cumba-oss-corej-rules-<version>.zip` (data rule packages) and
-`cumba-oss-corej-rules-define-<version>.zip` (Define-XML packages).
+**`rules/` and `rules-define/` ship FULL**, so a freshly unzipped bundle validates out of the box.
+Until 2026-09-11 both shipped empty with a README telling the operator to unzip a release asset in
+by hand, which was the one store in this product that worked that way.
+
+`download-corej-rules` in `pom.xml` fetches two assets of one pinned
+[cumba-oss-corej-rules](https://github.com/cumba-oss/cumba-oss-corej-rules) release at
+`generate-resources` — `cumba-oss-corej-rules-<version>.zip` (data rule packages) and
+`cumba-oss-corej-rules-define-<version>.zip` (Define-XML packages) — verifies each against its own
+`sha256`, and `src/assembly/dist.xml` stages them into the bundle. The mechanism is
+`cumba-databrowser-launch`'s, copied deliberately: the data browser, the REST service and this CLI
+then acquire the **same corpus the same way**, and answer identically for the same study.
+
+⚠ The bundled corpus has **no CORE rule family** (externally sourced, not redistributable as a set)
+and therefore **no TIG coverage** — `rules-draft-tig-1-0` is the only TIG package outside CORE, and
+it is a DRAFT. Release `v0.3.1` does ship all 15 `rules-draft-*` packages: parked candidates, never
+selected for you, and not a basis for a submission. See `src/main/dist/rules/README.md`.
+
+⚠⚠ **Bumping the corpus is a five-repo change** — this repo, `cumba-oss-corej-rest`, their two
+internal twins and `cumba-data-browser` all pin `dependency.corej-rules.tag` and the two hashes,
+and `databrowser-meta/check_versions.sh` asserts they agree. Bump the tag, the version and **both**
+hashes together, and re-measure `corej.rules.draft-packages`.
+
+⚠ The operator is never locked to the bundled version: `COREJ_RULES_DIR` /
+`COREJ_DEFINE_RULES_DIR` point the engine anywhere, outranking the bundle.
+
+### The guard
+
+`verify-corej-rules-staged` (antrun, `prepare-package`) counts what was unpacked and fails by name:
+`packages.json` present in each corpus, ≥ 28 `rules-*.json`, ≥ 4 `rules-define-*.json`, and
+**exactly** `corej.rules.draft-packages` DRAFT packages. `src/test/smoke.sh` makes the matching
+assertion against the *assembled bundle*. The two are deliberately different subjects — the
+download and the zip — because the fileSets that join them point **through a version-bearing
+directory** (`cumba-oss-corej-rules-<version>/rules/`), and a wrong path there stages nothing at
+all, silently, with every gate green.
+
+⚠ The draft assertion is an **exact equality, and the number is not 0**: `v0.3.1` still ships all
+15 DRAFT packages. `build_distribution.sh`'s `MAX_DRAFT_PKGS=0` is a different subject — the data
+browser's staged platform archives — and is a deliberate blocker awaiting the DRAFT-free tag.
+Equality here means that tag bump turns this build red and forces the number to 0 in the same edit,
+rather than passing silently.
+
+### Pointing the engine somewhere else
 
 | What | Flag | Falls back to |
 |---|---|---|
@@ -247,16 +286,23 @@ CWD-relative default never applies. `cumba-oss-corej-cli.conf` sets each system 
 — the table's precedence, but resolving against the bundle rather than against wherever you
 happened to be standing. ⚠ The `${sys:…}` level is not cosmetic: the launcher applies
 `[properties]` with an unconditional `System.setProperty`, so a two-level form would *overwrite*
-a `-D` the operator passed and silently fall back to the bundle's empty directory. The three
-directories ship empty, each with a README saying what goes in it:
+a `-D` the operator passed and silently fall back to the bundle's own directory.
+
+To run against a **different** corpus version, either point `COREJ_RULES_DIR` at it — nothing is
+copied — or replace the bundle's contents in place:
 
 ```bash
 unzip cumba-oss-corej-rules-<version>.zip
+rm -f cumba-oss-corej-cli-<version>/rules/rules-*.json \
+      cumba-oss-corej-cli-<version>/rules/packages.json
 mv cumba-oss-corej-rules-<version>/rules/* cumba-oss-corej-cli-<version>/rules/
 ```
 
 ⚠ Move the **contents**. The corpus archive has its own top-level directory, so unzipping it
 *into* the bundle's `rules/` buries the JSON two levels too deep and the engine finds nothing.
+
+⚠ Delete the shipped `rules-*.json` first, as above: the engine reads whatever packages are
+present, so leftovers from the bundled corpus stay selectable and silently mix two versions.
 
 ### CDISC Library access
 
@@ -311,10 +357,11 @@ docker compose run --rm cli --seed-cache
 at `/data` itself: `-d <dir>` stages every regular file it lists with no extension filter, so a
 loose store file at the mount root would be uploaded as a study dataset.
 
-⚠ **The image bakes no rule corpus.** The corpora are released separately by
-`cumba-oss-corej-rules` and are not Maven dependencies. Unpack the release assets into
-`corej-data/rules` and `corej-data/rules-define`; until then every run reports that it found no
-packages, and the entrypoint says so before the run starts.
+⭐ **The image bakes the pinned rule corpus**, and the entrypoint seeds it into
+`corej-data/rules` and `corej-data/rules-define` on first start, so the stack validates with no
+manual step. ⚠ Seeding is **skipped once a directory holds its own `packages.json`** — put another
+corpus version's contents there and it wins permanently. If a run still reports no packages, the
+entrypoint says so before the run starts and names the directory it searched.
 
 ## What is deliberately not here
 

@@ -18,6 +18,20 @@
 # engine classes loaded, and corej.rules.dir resolved to the bundle rather than to
 # the caller's CWD.
 #
+# ⭐ Probe 1 also proves THE CORPUS IS ACTUALLY IN THE BUNDLE. That error ends with
+# "Available: <short names>", built by StudyValidationService.availableShortNames
+# from the directory it just searched, so requiring a NON-EMPTY list there is an
+# end-to-end check on the assembly's staging. The antrun guard
+# verify-corej-rules-staged in pom.xml checks the DOWNLOAD; this checks the ZIP,
+# and the fileSets that join the two point through a version-bearing directory
+# (cumba-oss-corej-rules-<version>/rules/), which is exactly what a version bump
+# gets wrong. Staging nothing is otherwise SILENT: every gate stays green and the
+# operator finds out on their first run.
+#
+# ⚠ Requiring a NON-EMPTY Available: list is not enough as a substring test — the
+# list is empty-string-joined, so "Available: " with nothing after it is a
+# perfectly well-formed match. Extract the list and test what follows.
+#
 # Probe 2 asks for an output format that cannot exist. The engine answers by
 # ENUMERATING the report-writer SUPPLIERS it can see on the classpath, so requiring
 # `xlsx` in that list proves cumba-oss-corej-report-xlsx is present and its
@@ -46,6 +60,10 @@
 # only backstop for those. Do not read `smoke: OK` as "every jar is present"; read it
 # as "the launcher, the engine and the report-writer registrations load".
 #
+# ⚑ The internal twin cumba-corej-cli/src/test/smoke.sh is the same script with the
+# internal bundle names. The two are meant to stay in step: a fix to one belongs in
+# the other.
+#
 # Usage: smoke.sh <path-to-exploded-bundle>
 
 set -euo pipefail
@@ -54,7 +72,7 @@ set -euo pipefail
 # The assertions below are `case` matches on captured output, so a command that
 # vanished (exit 127, empty output) reads as "the bundle did not print what we
 # expected" — a broken environment reported as a broken artefact.
-for tool in java ls mktemp printf rm wc; do
+for tool in find java ls mktemp printf rm wc; do
     command -v "$tool" >/dev/null 2>&1 \
         || { echo "smoke: required tool not found: $tool" >&2; exit 1; }
 done
@@ -92,6 +110,27 @@ libcount="$(ls "$BUNDLE"/lib/*.jar 2>/dev/null | wc -l)"
 for d in rules rules-define dictionaries; do
     [ -d "$BUNDLE/$d" ] \
         || { echo "smoke: bundle is missing $d/ — see the DO-NOT-DELETE note in the .conf" >&2; exit 1; }
+done
+
+# ⛔ THE BUNDLED RULE CORPUS. rules/ and rules-define/ ship POPULATED since
+# 2026-09-11; before that they were empty by design and only had to exist.
+#
+# The manifest is asserted separately from the count on purpose: the engine resolves
+# rules THROUGH packages.json, so a corpus that lost it fails only at run time, and a
+# count alone passes straight over that.
+#
+# ⚠ These floors are databrowser-meta/build_distribution.sh's MIN_CORE_RULES (28) and
+# MIN_DEFINE_PKGS (4), so the app and the clients move together. They are floors, not
+# counts — v0.3.1 stages 47 and 4 — and they are NOT the place to encode which
+# families shipped. The exact DRAFT-package ratchet lives in pom.xml, where the pin
+# it tracks lives; duplicating that number here would make it two places to bump.
+for corpus in "rules:rules-*.json:28" "rules-define:rules-define-*.json:4"; do
+    dir="${corpus%%:*}"; rest="${corpus#*:}"; glob="${rest%%:*}"; floor="${rest##*:}"
+    [ -f "$BUNDLE/$dir/packages.json" ] \
+        || { echo "smoke: $dir/packages.json is missing from the bundle — the engine resolves rules through that manifest, so this fails only at run time" >&2; exit 1; }
+    n="$(find "$BUNDLE/$dir" -maxdepth 1 -name "$glob" -type f | wc -l)"
+    [ "$n" -ge "$floor" ] \
+        || { echo "smoke: only $n $glob in $BUNDLE/$dir — expected at least $floor; the assembly staged the wrong path (it points through a version-bearing directory)" >&2; exit 1; }
 done
 
 # The xlsx writer's POI chain, by name. See the ⛔ block in the header: probe 2 cannot
@@ -138,9 +177,47 @@ case "$out" in
     *"Unknown rule package '__corej_smoke_probe__'"*) ;;
     *) fail "did not reach the engine's rule-package resolution" ;;
 esac
+# ⚠ THE TRAILING DOT IS LOAD-BEARING. A bare *"$BUNDLE/rules"* also matches
+# "$BUNDLE/rules-define", so a .conf whose corej.rules.dir had been copy-pasted to
+# point at the Define-XML corpus would satisfy it. The engine's message ends the path
+# with ". Available:", so anchoring on "rules." pins it to the directory meant.
 case "$out" in
-    *"$BUNDLE/rules"*) ;;
+    *"$BUNDLE/rules."*) ;;
     *) fail "corej.rules.dir did not resolve to the bundle ($BUNDLE/rules)" ;;
+esac
+
+# ⛔ The corpus as the ENGINE sees it, not as `find` sees it. The check further up
+# proves the files are in the zip; this proves the engine, reading the directory its
+# own .conf resolved, enumerates something. StudyValidationService.availableShortNames
+# builds that list from the directory listing, so an empty list means the engine is
+# looking at an empty or wrong directory.
+#
+# ⚠ BE HONEST ABOUT WHAT THIS ADDS: defence in depth, not an independent check. Every
+# sabotage tried on 2026-09-11 (no packages.json, no rule files, a .conf pointing
+# elsewhere) was caught by an EARLIER assertion, and no case could be constructed
+# where this one fails alone. It is kept because it costs one `case` and is the only
+# assertion here phrased in terms of what the engine sees — but do not cite it as the
+# thing that catches an empty corpus. The find-based floor above is that thing.
+#
+# ⚠⚠ DO NOT KEY THIS ON A PACKAGE NAME. The first version (in the internal twin)
+# required "cdisc-sdtmig-3-4" in the list. Measured 2026-09-11: deleting exactly that
+# file fails EARLIER, in the loader's manifest reconciliation (packages.json still
+# claims it), so the assertion could not be triggered — while a future corpus that
+# legitimately stops shipping that package would have turned it into a false alarm.
+# An assertion that cannot fail on the fault it names, but can fail on a correct
+# change, is worse than none.
+avail=""
+while IFS= read -r line; do
+    case "$line" in
+        *"Unknown rule package '__corej_smoke_probe__'"*)
+            avail="${line#*Available: }"
+            [ "$avail" = "$line" ] && avail=""      # no "Available: " on the line at all
+            break ;;
+    esac
+done <<< "$out"
+
+case "$avail" in
+    "" | " "*) fail "the engine enumerated an EMPTY rule corpus in the bundle — rules/ reached the zip but the engine does not see a usable corpus there" ;;
 esac
 
 # A usage error exits 2; anything else means it failed somewhere unexpected.
@@ -204,4 +281,5 @@ for fmt in json json-2 xlsx; do
 done
 
 echo "smoke: OK — $BUNDLE launched, loaded the engine and its report writers,"
-echo "smoke:      and resolved corej.rules.dir to the bundle ($libcount jars in lib/)"
+echo "smoke:      resolved corej.rules.dir to the bundle ($libcount jars in lib/),"
+echo "smoke:      and enumerated the bundled rule corpus"

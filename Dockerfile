@@ -7,10 +7,11 @@
 #   docker build -t cumba-oss-corej-cli:local .
 #   docker run --rm cumba-oss-corej-cli:local --help
 #
-# ⚠ The rule corpus is NOT in this image — see "The stores" below. Supply it:
-#   docker run --rm -v corej-rules:/app/rules -v "$PWD":/data \
-#       cumba-oss-corej-cli:local -rp cdisc-sdtmig-3-4 -d /data/datasets \
-#       -o /data/CORE-Report.json
+# ⭐ The rule corpus IS in this image (since 2026-09-11) — pinned and hash-verified
+# at build time, so a plain run validates with no mount:
+#   docker run --rm -v "$PWD":/data cumba-oss-corej-cli:local \
+#       -rp cdisc-sdtmig-3-4 -d /data/datasets -o /data/CORE-Report.json
+# Mount your own over /app/rules to use a different corpus version.
 #
 # ⚠ Nor is the CDISC metadata store. Seed it ONCE onto a volume you keep; without
 # it every rule needing CDISC Library metadata SKIPs, and the run says so up front:
@@ -70,19 +71,26 @@ RUN set -eu; \
     useradd --uid 1000 --gid 1000 --home-dir /app --shell /usr/sbin/nologin corej
 
 # The exploded dist bundle: cumba-oss-corej-cli.jar (the cumba-oss-bootstrap
-# launcher) and its sidecar .conf, flat lib/, run.sh, and the three EMPTY store
-# directories the bundle ships (rules/ rules-define/ dictionaries/, each holding a
-# README that says what belongs there and where to get it). Those empties are
-# load-bearing — see below.
+# launcher) and its sidecar .conf, flat lib/, run.sh, and the three store
+# directories the bundle ships — rules/ and rules-define/ POPULATED with the pinned
+# corpus, dictionaries/ empty, each holding a README. Their existence is
+# load-bearing even when empty — see below.
 COPY --from=build /build/out /app/dist
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # ---------- The stores ----------
 #
-# ⚠⚠ No rule corpus ships in this image. The corpora are released on their own
-# cadence by cumba-oss-corej-rules and are not Maven dependencies, so there is
-# nothing for the build stage to copy. The operator supplies them.
+# ⭐ The two rule corpora DO ship in this image, since 2026-09-11: the build stage
+# fetches them from a pinned, hash-verified cumba-oss-corej-rules release (see
+# download-corej-rules in pom.xml) and the assembly stages them into the bundle,
+# which is COPYed above. They are still not Maven artifacts and are still released
+# on their own cadence — the pin is what reconciles the two, and bumping it is a
+# five-repo change (this repo, cumba-oss-corej-rest, their two internal twins and
+# cumba-data-browser).
+#
+# ⚠ Dictionaries remain the operator's to install: those sets are licensed
+# separately and are never redistributed here.
 #
 # ⚠⚠ "Configured but MISSING" is a hard error for two of the three: the dictionary
 # store throws when a validation run sets up, and the Define-XML corpus throws on
@@ -104,10 +112,12 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 # property > the bundle's own directory. So each ENV below overrides the bundle
 # default, and `docker run -e` overrides the ENV.
 
-# The data rule corpus (`-rp`, or `-s` + `-v`). Take the matching
-# cumba-oss-corej-rules release asset and put its CONTENTS here, so this directory
-# holds packages.json and rules-*.json directly. Missing or empty is tolerated — a
-# run reports that it found no packages and names the directory it searched.
+# The data rule corpus (`-rp`, or `-s` + `-v`). The entrypoint mirrors the bundled
+# corpus into here on every start, so this is populated unless a mount masks it.
+# To use a different version, mount one over this path — its CONTENTS, so the
+# directory holds packages.json and rules-*.json directly. Missing or empty is
+# tolerated: a run reports that it found no packages and names the directory it
+# searched.
 ENV COREJ_RULES_DIR=/app/rules
 
 # The Define-XML conformance corpus, used only by `-vx` in local mode. A SEPARATE
