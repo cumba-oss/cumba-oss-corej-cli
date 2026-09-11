@@ -8,19 +8,24 @@
 # It also pins the unified CDISC metadata store onto a mountable path and says so
 # once when none is present — see the block below. It never seeds it.
 #
-# ⚠⚠ THIS IMAGE SHIPS NO RULES AND NO DICTIONARIES. The corpora are released on
-# their own cadence by cumba-oss-corej-rules and are not Maven dependencies, so the
-# build stage has nothing to bake. The bundle's rules/, rules-define/ and
-# dictionaries/ directories ship EMPTY, each holding a README that says what
-# belongs there. The operator supplies the content; see the Dockerfile for the
-# mount recipes.
+# ⭐ THIS IMAGE SHIPS BOTH RULE CORPORA (since 2026-09-11), pinned and hash-verified
+# at build time from a cumba-oss-corej-rules release and staged into the bundle, from
+# where the blocks below SEED them onto the operator's paths — if absent, never
+# overwriting a corpus already there. The bundle's dictionaries/ still ships EMPTY:
+# those sets are licensed separately and are never redistributed. See the Dockerfile
+# for the mount recipes.
+#
+# ⚑ This block said "THIS IMAGE SHIPS NO RULES AND NO DICTIONARIES" until 2026-09-11,
+# which was true when the corpora were released on their own cadence with nothing for
+# the build stage to bake. They still are; the pin is what reconciles that with
+# shipping them.
 #
 # ⚠⚠ Empty and missing are NOT the same to the engine. "Configured but missing" is
 # a hard error for two of the corpora: the dictionary store throws when a validation
 # run sets up, and the Define-XML corpus throws on every local-mode -vx run. rules/
 # treats missing and empty alike. So each of those blocks guarantees the directory
-# EXISTS, falling back to the bundle's own empty copy when it cannot create the
-# configured one. An empty store degrades to a loud per-rule SKIP; a missing one
+# EXISTS, falling back to the bundle's own copy when it cannot create the configured
+# one. An empty store degrades to a loud per-rule SKIP; a missing one
 # throws.
 #
 # ⚠⚠ The metadata store is the exception, and it inverts: it is a single zip FILE,
