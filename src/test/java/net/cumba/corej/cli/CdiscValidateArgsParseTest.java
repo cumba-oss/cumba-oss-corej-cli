@@ -398,14 +398,6 @@ class CdiscValidateArgsParseTest
     }
 
 
-    private static String stringField(Object args, String name) throws Exception
-    {
-        var f = args.getClass().getDeclaredField(name);
-        f.setAccessible(true);
-        return (String) f.get(args);
-    }
-
-
     private static boolean booleanField(Object args, String name) throws Exception
     {
         var f = args.getClass().getDeclaredField(name);
