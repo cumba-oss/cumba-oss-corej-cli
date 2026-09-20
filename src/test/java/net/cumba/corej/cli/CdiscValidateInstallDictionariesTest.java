@@ -744,9 +744,9 @@ class CdiscValidateInstallDictionariesTest
                               "id": "u1",
                               "Core": {"Id": "CORE-DICT-001"},
                               "Executability": "Fully Executable",
-                              "Operations": [{"id": "$terms", "expression":
+                              "Bindings": [{"name": "$terms", "expression":
                                   "valid_external_dictionary_value(USUBJID, external_dictionary_type=\\"meddra\\", dictionary_term_type=\\"PT\\")"}],
-                              "Check": {"all": [{"name": "$terms", "operator": "non_empty"}]}
+                              "Check": {"expression": "not empty($terms)"}
                             }
                           }
                         }
@@ -775,7 +775,7 @@ class CdiscValidateInstallDictionariesTest
                     "u1": {
                       "id": "u1",
                       "Core": {"Id": "CORE-TEST-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }

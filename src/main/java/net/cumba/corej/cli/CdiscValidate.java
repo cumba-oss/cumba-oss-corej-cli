@@ -259,7 +259,7 @@ public final class CdiscValidate
     {
 
         /**
-         * Resolves the install source for one downloadable dictionary type.
+         * Resolves the download source for one dictionary type.
          *
          * @param aType
          *            one of {@link #DOWNLOADABLE_TYPES}.
@@ -285,7 +285,7 @@ public final class CdiscValidate
     {
 
         /**
-         * Obtains this run's CDISC Library provider, or none when no Library access is configured.
+         * Returns the CDISC Library provider for this run, if one is configured.
          *
          * @param aCacheDir
          *            an HTTP response cache directory, or {@code null} for the shared default
@@ -1900,6 +1900,8 @@ public final class CdiscValidate
                 .toAbsolutePath();
         DefineConformanceInput.Builder builder = DefineConformanceInput.builder(defineXml)
                 .useDefaultSubmissionFolder(true);
+        @Nullable
+        CdiscLibraryBackedLibraryProvider libraryProvider;
         Path submissionFolder = resolveDefineSubmissionFolder(args);
         if (submissionFolder != null)
         {
@@ -1914,8 +1916,7 @@ public final class CdiscValidate
         // not an HTTP response cache directory. The define-conformance library provider still
         // uses the CDISC Library API and resolves its own cache via CDISC_API_CACHE /
         // cdisc.library.api.cache / ~/.cdiscApiCache.
-        @Nullable
-        CdiscLibraryBackedLibraryProvider libraryProvider = library.provider(null);
+        libraryProvider = library.provider(null);
         if (libraryProvider != null)
         {
             builder.libraryProvider(libraryProvider);

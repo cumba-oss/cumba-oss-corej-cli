@@ -379,7 +379,7 @@ class CdiscValidateTest
                     "u1": {
                       "id": "u1",
                       "Core": {"Id": "CORE-A-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
@@ -426,7 +426,7 @@ class CdiscValidateTest
                       "id": "u1",
                       "Core": {"Id": "CORE-TEST-001"},
                       "Sensitivity": "Record",
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
@@ -489,7 +489,7 @@ class CdiscValidateTest
                     "u1": {
                       "id": "u1",
                       "Core": {"Id": "CORE-TEST-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
@@ -627,7 +627,7 @@ class CdiscValidateTest
                     "u1": {
                       "id": "u1",
                       "Core": {"Id": "CORE-RD-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
@@ -684,7 +684,7 @@ class CdiscValidateTest
                     "u1": {
                       "id": "u1",
                       "Core": {"Id": "CORE-RD-DUP-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
@@ -734,7 +734,7 @@ class CdiscValidateTest
                     "u1": {
                       "id": "u1",
                       "Core": {"Id": "CORE-DS-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
@@ -802,7 +802,7 @@ class CdiscValidateTest
                     "u1": {
                       "id": "u1",
                       "Core": {"Id": "CORE-NOOUT-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
@@ -917,7 +917,7 @@ class CdiscValidateTest
                     "x1": {
                       "id": "x1",
                       "Core": {"Id": "CORE-EXTRA-001"},
-                      "Check": {"name": "USUBJID", "operator": "var_exists"}
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
                     }
                   }
                 }
