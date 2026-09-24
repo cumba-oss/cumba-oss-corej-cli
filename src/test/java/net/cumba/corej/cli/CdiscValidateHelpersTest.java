@@ -396,7 +396,7 @@ class CdiscValidateHelpersTest
 
     @Test
     void resolveMetadataProducts_fullFormTokenResolvesAgainstAnEmptyCache(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path emptyDir)
+            @org.junit.jupiter.api.io.TempDir Path emptyDir)
         throws Exception
     {
         CdiscValidate.Args a = new CdiscValidate.Args();
@@ -410,16 +410,16 @@ class CdiscValidateHelpersTest
 
     @Test
     void resolveMetadataProducts_badTokenBecomesAUsageError(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path emptyDir)
+            @org.junit.jupiter.api.io.TempDir Path emptyDir)
         throws Exception
     {
         CdiscValidate.Args a = new CdiscValidate.Args();
         // A token no source publishes stays a usage error in every configuration — with or
         // without a metadata store supplying the catalogue.
         a.metadataProducts = new ArrayList<>(List.of("adamig-9-9"));
-        java.lang.reflect.InvocationTargetException ite = org.junit.jupiter.api.Assertions
-                .assertThrows(java.lang.reflect.InvocationTargetException.class,
-                        () -> resolveMetadataProducts(a));
+        java.lang.reflect.InvocationTargetException ite = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> resolveMetadataProducts(a));
         // The cause is the CLI's UsageException (exit code 2), naming the offending token.
         assertEquals("UsageException", ite.getCause().getClass().getSimpleName());
         assertTrue(ite.getCause().getMessage().contains("adamig-9-9"), ite.getCause().getMessage());
@@ -451,10 +451,10 @@ class CdiscValidateHelpersTest
      */
     @Test
     void resolveMetadataProducts_bareTokenResolvesThroughTheCatalogue_notVerbatim(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+            @org.junit.jupiter.api.io.TempDir Path dir)
         throws Exception
     {
-        java.nio.file.Path store = dir.resolve("metadata-cache.zip");
+        Path store = dir.resolve("metadata-cache.zip");
         new net.cumba.corej.core.metadata.store.MetadataStoreWriter().publishedCtPackages(List.of())
                 .productCatalogue(
                         List.of("standards/zzz/zzztestig-9-9", "standards/zzz/zzzotherig-1-0"))
@@ -501,7 +501,7 @@ class CdiscValidateHelpersTest
      */
     @Test
     void toParams_declaredMetadataProducts_landOnTheBuiltParamsInOrder(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path emptyPickleDir)
+            @org.junit.jupiter.api.io.TempDir Path emptyPickleDir)
         throws Exception
     {
         CdiscValidate.Args a = new CdiscValidate.Args();
@@ -541,12 +541,11 @@ class CdiscValidateHelpersTest
      * </p>
      */
     @Test
-    void toParams_explicitCacheOutranksAnAmbientStore(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+    void toParams_explicitCacheOutranksAnAmbientStore(@org.junit.jupiter.api.io.TempDir Path dir)
         throws Exception
     {
-        java.nio.file.Path ambient = dir.resolve("ambient-store.zip");
-        java.nio.file.Path named = dir.resolve("named-store.zip");
+        Path ambient = dir.resolve("ambient-store.zip");
+        Path named = dir.resolve("named-store.zip");
         new net.cumba.corej.core.metadata.store.MetadataStoreWriter().publishedCtPackages(List.of())
                 .productCatalogue(List.of()).write(ambient);
         new net.cumba.corej.core.metadata.store.MetadataStoreWriter().publishedCtPackages(List.of())
@@ -619,12 +618,11 @@ class CdiscValidateHelpersTest
      */
     @Test
     void resolveDefineSubmissionFolder_onlyEverNamesAFolderTheUserGave(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp)
+            @org.junit.jupiter.api.io.TempDir Path tmp)
         throws Exception
     {
-        java.nio.file.Path dataDir = java.nio.file.Files.createDirectory(tmp.resolve("data"));
-        java.nio.file.Path dataFile = java.nio.file.Files.writeString(dataDir.resolve("dm.csv"),
-                "USUBJID\n");
+        Path dataDir = java.nio.file.Files.createDirectory(tmp.resolve("data"));
+        Path dataFile = java.nio.file.Files.writeString(dataDir.resolve("dm.csv"), "USUBJID\n");
 
         assertNull(resolveDefineSubmissionFolder(null), "no -d: the engine default applies");
         assertNull(resolveDefineSubmissionFolder("https://host/study"), "a URI has no folder");
@@ -638,7 +636,7 @@ class CdiscValidateHelpersTest
     }
 
 
-    private static java.nio.file.@org.jspecify.annotations.Nullable Path resolveDefineSubmissionFolder(
+    private static @org.jspecify.annotations.Nullable Path resolveDefineSubmissionFolder(
             @org.jspecify.annotations.Nullable String data)
         throws Exception
     {
@@ -647,7 +645,7 @@ class CdiscValidateHelpersTest
         Method m = CdiscValidate.class.getDeclaredMethod("resolveDefineSubmissionFolder",
                 CdiscValidate.Args.class);
         m.setAccessible(true);
-        return (java.nio.file.Path) m.invoke(null, a);
+        return (Path) m.invoke(null, a);
     }
 
     // ------------------------------------------------------------------

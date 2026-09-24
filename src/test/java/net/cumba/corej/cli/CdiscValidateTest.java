@@ -5,11 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -28,6 +32,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
 class CdiscValidateTest
 {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @TempDir
     Path tempDir;
@@ -386,12 +392,21 @@ class CdiscValidateTest
                 """);
         writeCdiscManifest(rulesDir, rulesFile);
 
+        Path report = tempDir.resolve("ar.json");
+
         Captured cap = capture();
+        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
+        // know that, and a value that would silently satisfy the assertions is the last thing
+        // this file needs.
+        int rc = Integer.MIN_VALUE;
         try
         {
-            OfflineCli.run(new String[]
+            // R3: a run must name its rule package. Without -rp this case stopped at the
+            // selection guard (exit 2, "No rule package selected") and never reached the path
+            // its name claims.
+            rc = OfflineCli.run(new String[]
             {
-                    "-d", source.toString(), "-o", tempDir.resolve("ar.json").toString(), "-mp",
+                    "-d", source.toString(), "-o", report.toString(), "-rp", "adamig-1-3", "-mp",
                     "adam/adamig-1-3", "--rules-dir", rulesDir.toString()
             }, cap.out, cap.err);
         }
@@ -410,6 +425,13 @@ class CdiscValidateTest
             Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
                     + ex.getMessage());
         }
+
+        assertEquals(0, rc, cap.errAsString());
+        assertTrue(Files.exists(report), "JSON report must be written");
+        // The report's conformance header is what proves the ADaM branch ran.
+        JsonNode conformance = MAPPER.readTree(report.toFile()).path("Conformance_Details");
+        assertEquals("ADAMIG", conformance.path("Standard").asText());
+        assertEquals("V1.3", conformance.path("Version").asText());
     }
 
 
@@ -691,13 +713,22 @@ class CdiscValidateTest
                 """);
         writeCdiscManifest(rulesDir, rulesFile);
 
+        Path report = tempDir.resolve("dup.json");
+
         Captured cap = capture();
+        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
+        // know that, and a value that would silently satisfy the assertions is the last thing
+        // this file needs.
+        int rc = Integer.MIN_VALUE;
         try
         {
-            OfflineCli.run(new String[]
+            // R3: a run must name its rule package. Without -rp this case stopped at the
+            // selection guard (exit 2, "No rule package selected") and never reached the path
+            // its name claims.
+            rc = OfflineCli.run(new String[]
             {
-                    "-d", source.toString(), "-rd", refLib.toString(), "-o",
-                    tempDir.resolve("dup.json").toString(), "--rules-dir", rulesDir.toString()
+                    "-d", source.toString(), "-rd", refLib.toString(), "-o", report.toString(),
+                    "-rp", "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
             }, cap.out, cap.err);
         }
         catch (RuntimeException ex)
@@ -714,6 +745,17 @@ class CdiscValidateTest
             // recorded mutant kills silently conditional on the CDISC Library being up).
             Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
                     + ex.getMessage());
+        }
+
+        assertEquals(0, rc, cap.errAsString());
+        assertTrue(Files.exists(report), "JSON report must be written");
+        // The reference library's DM duplicates the primary's and is skipped: DM is validated
+        // once, and from the primary library.
+        assertEquals(List.of("DM", "VS"), reportedDomains(report).stream().sorted().toList());
+        for (JsonNode dataset : MAPPER.readTree(report.toFile()).path("Dataset_Details"))
+        {
+            assertEquals(source.getFileName(), Path.of(dataset.path("path").asText()).getFileName(),
+                    "validated from the primary library: " + dataset);
         }
     }
 
@@ -741,13 +783,22 @@ class CdiscValidateTest
                 """);
         writeCdiscManifest(rulesDir, rulesFile);
 
+        Path report = tempDir.resolve("ds.json");
+
         Captured cap = capture();
+        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
+        // know that, and a value that would silently satisfy the assertions is the last thing
+        // this file needs.
+        int rc = Integer.MIN_VALUE;
         try
         {
-            OfflineCli.run(new String[]
+            // R3: a run must name its rule package. Without -rp this case stopped at the
+            // selection guard (exit 2, "No rule package selected") and never reached the path
+            // its name claims.
+            rc = OfflineCli.run(new String[]
             {
-                    "-d", source.toString(), "-ds", "DM", "-o",
-                    tempDir.resolve("ds.json").toString(), "--rules-dir", rulesDir.toString()
+                    "-d", source.toString(), "-ds", "DM", "-o", report.toString(), "-rp",
+                    "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
             }, cap.out, cap.err);
         }
         catch (RuntimeException ex)
@@ -765,6 +816,11 @@ class CdiscValidateTest
             Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
                     + ex.getMessage());
         }
+
+        assertEquals(0, rc, cap.errAsString());
+        assertTrue(Files.exists(report), "JSON report must be written");
+        // VS is only a reference now: DM is the one dataset validated.
+        assertEquals(List.of("DM"), reportedDomains(report));
     }
 
 
@@ -811,15 +867,23 @@ class CdiscValidateTest
 
         // Change to tempDir for the duration of the run so the default-name file lands there.
         String savedUserDir = System.getProperty("user.dir");
+        Path runtime = tempDir.resolve("nout-rt.csv");
         Captured cap = capture();
+        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
+        // know that, and a value that would silently satisfy the assertions is the last thing
+        // this file needs.
+        int rc = Integer.MIN_VALUE;
         try
         {
             System.setProperty("user.dir", tempDir.toString());
+            // R3: a run must name its rule package. Without -rp this case stopped at the
+            // selection guard (exit 2, "No rule package selected") and never reached the path
+            // its name claims.
             // Use --runtime-report to avoid creating a runtime CSV in cwd.
-            OfflineCli.run(new String[]
+            rc = OfflineCli.run(new String[]
             {
-                    "-d", source.toString(), "--runtime-report",
-                    tempDir.resolve("nout-rt.csv").toString(), "--rules-dir", rulesDir.toString()
+                    "-d", source.toString(), "--runtime-report", runtime.toString(), "-rp",
+                    "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
             }, cap.out, cap.err);
         }
         catch (RuntimeException ex)
@@ -845,19 +909,43 @@ class CdiscValidateTest
             }
         }
         // Default name lives at cwd; the file may be in either old or new cwd depending on
-        // jvm path resolution. Either way, the run completed enough to exercise the helpers.
-        // Clean up: delete any CORE-Report-*.json that landed in the saved cwd.
-        try (var stream = Files.newDirectoryStream(Path.of(savedUserDir), "CORE-Report-*.json"))
+        // jvm path resolution. Clean up both before asserting, so a failure leaves no stray
+        // report behind — and the count is the proof the default name was used.
+        int defaultNamed = deleteDefaultNamedReports(Path.of(savedUserDir))
+                + deleteDefaultNamedReports(tempDir);
+        assertEquals(0, rc, cap.errAsString());
+        assertTrue(Files.exists(runtime), "runtime CSV must be written at --runtime-report");
+        assertEquals(1, defaultNamed, "one CORE-Report-<timestamp>.json must be written");
+    }
+
+
+    /** Deletes every {@code CORE-Report-*.json} in {@code aDir}; returns how many it deleted. */
+    private static int deleteDefaultNamedReports(Path aDir) throws java.io.IOException
+    {
+        int deleted = 0;
+        try (var stream = Files.newDirectoryStream(aDir, "CORE-Report-*.json"))
         {
             for (Path p : stream)
             {
-                Files.deleteIfExists(p);
+                if (Files.deleteIfExists(p))
+                {
+                    deleted++;
+                }
             }
         }
-        catch (java.io.IOException _)
+        return deleted;
+    }
+
+
+    /** The {@code domain} of every {@code Dataset_Details} entry of a JSON report, in order. */
+    private static List<String> reportedDomains(Path aReport) throws java.io.IOException
+    {
+        List<String> domains = new ArrayList<>();
+        for (JsonNode dataset : MAPPER.readTree(aReport.toFile()).path("Dataset_Details"))
         {
-            // best-effort cleanup
+            domains.add(dataset.path("domain").asText());
         }
+        return domains;
     }
 
 
@@ -1168,7 +1256,7 @@ class CdiscValidateTest
         String base = n.substring("rules-".length(), n.length() - ".json".length());
         int dash = base.indexOf('-');
         new net.cumba.corej.core.RulePackageManifest("test",
-                java.util.List.of(new net.cumba.corej.core.RulePackageManifest.Entry(n, "CDISC",
+                List.of(new net.cumba.corej.core.RulePackageManifest.Entry(n, "CDISC",
                         base.substring(0, dash), base.substring(dash + 1), 1))).writeTo(rulesDir);
     }
 
@@ -1184,12 +1272,12 @@ class CdiscValidateTest
         Path folder = Files.createDirectory(tempDir.resolve("src-" + System.nanoTime()));
         try (var in = CdiscValidateTest.class.getResourceAsStream("/dm.csv"))
         {
-            org.junit.jupiter.api.Assertions.assertNotNull(in);
+            assertNotNull(in);
             Files.copy(in, folder.resolve("dm.csv"));
         }
         try (var in = CdiscValidateTest.class.getResourceAsStream("/vs.csv"))
         {
-            org.junit.jupiter.api.Assertions.assertNotNull(in);
+            assertNotNull(in);
             Files.copy(in, folder.resolve("vs.csv"));
         }
         return folder;
@@ -1203,7 +1291,7 @@ class CdiscValidateTest
         {
             try (var in = CdiscValidateTest.class.getResourceAsStream("/" + name))
             {
-                org.junit.jupiter.api.Assertions.assertNotNull(in, "fixture not found: " + name);
+                assertNotNull(in, "fixture not found: " + name);
                 Files.copy(in, folder.resolve(name));
             }
         }

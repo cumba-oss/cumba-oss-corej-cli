@@ -210,7 +210,7 @@ class CdiscValidateDefineXmlTest
                     "--define-rules-dir", defineRules(tempDir), "--define-family", "CDISC"
             }, cap.out, cap.err, aCacheDir -> provider);
         }
-        catch (IOException | RuntimeException _)
+        catch (IOException | RuntimeException ignored)
         {
             // Data-lane variance is out of scope; the conformance report is already written.
         }
@@ -368,7 +368,7 @@ class CdiscValidateDefineXmlTest
         {
             OfflineCli.run(args, cap.out, cap.err);
         }
-        catch (java.io.IOException | RuntimeException _)
+        catch (IOException | RuntimeException ignored)
         {
             // Data-lane variance is out of scope here; the conformance report is already written.
         }

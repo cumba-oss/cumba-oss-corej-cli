@@ -166,7 +166,7 @@ class CdiscValidateInstallDictionariesTest
 
         private static byte[] zip(String aEntryName, String aContent) throws IOException
         {
-            var bytes = new java.io.ByteArrayOutputStream();
+            var bytes = new ByteArrayOutputStream();
             try (var out = new java.util.zip.ZipOutputStream(bytes))
             {
                 out.putNextEntry(new java.util.zip.ZipEntry(aEntryName));

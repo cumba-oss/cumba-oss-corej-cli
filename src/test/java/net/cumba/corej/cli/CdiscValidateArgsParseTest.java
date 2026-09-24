@@ -124,7 +124,7 @@ class CdiscValidateArgsParseTest
     void parse_missingDataAndDefine_throwsUsage()
     {
         InvocationTargetException ite = assertThrows(InvocationTargetException.class,
-                () -> parse());
+                CdiscValidateArgsParseTest::parse);
         assertTrue(ite.getCause().getMessage().contains("One of --data or --define-xml-path"),
                 ite.getCause().getMessage());
     }
@@ -157,8 +157,8 @@ class CdiscValidateArgsParseTest
     void parse_metadataProducts_splitsOnCommaAndPreservesOrder() throws Exception
     {
         Object parsed = parse("-d", "/tmp", "-mp", "adam/adam-occds-1-1,adam/adamig-1-3");
-        assertEquals(java.util.List.of("adam/adam-occds-1-1", "adam/adamig-1-3"),
-                metadataProducts(parsed), "-mp must split on comma and preserve the user order");
+        assertEquals(List.of("adam/adam-occds-1-1", "adam/adamig-1-3"), metadataProducts(parsed),
+                "-mp must split on comma and preserve the user order");
     }
 
 
@@ -166,8 +166,7 @@ class CdiscValidateArgsParseTest
     void parse_metadataProducts_repeatedFlagAppendsInOrder() throws Exception
     {
         Object parsed = parse("-d", "/tmp", "-mp", "adam/adam-occds-1-1", "-mp", "adam/adamig-1-3");
-        assertEquals(java.util.List.of("adam/adam-occds-1-1", "adam/adamig-1-3"),
-                metadataProducts(parsed));
+        assertEquals(List.of("adam/adam-occds-1-1", "adam/adamig-1-3"), metadataProducts(parsed));
     }
 
 
@@ -178,7 +177,7 @@ class CdiscValidateArgsParseTest
         // selected rule packages' declared standards supply the products (R7). ⚠ Since V4 the
         // one exception is a --rules-file-only selection, which requires -mp at parse time.
         Object parsed = parse("-d", "/tmp");
-        assertEquals(java.util.List.of(), metadataProducts(parsed));
+        assertEquals(List.of(), metadataProducts(parsed));
     }
 
 
@@ -252,8 +251,7 @@ class CdiscValidateArgsParseTest
         // A stray comma next to real tokens is benign - the declaration still names products,
         // so only the blanks are dropped (F10 errors only when NOTHING is left).
         Object parsed = parse("-d", "/tmp", "-mp", "adam/adamig-1-3,,adam/adam-occds-1-1");
-        assertEquals(java.util.List.of("adam/adamig-1-3", "adam/adam-occds-1-1"),
-                metadataProducts(parsed));
+        assertEquals(List.of("adam/adamig-1-3", "adam/adam-occds-1-1"), metadataProducts(parsed));
     }
 
     // ------------------------------------------------------------------
@@ -265,8 +263,8 @@ class CdiscValidateArgsParseTest
     void parse_rulesPackage_splitsOnCommaAndPreservesOrder() throws Exception
     {
         Object parsed = parse("-d", "/tmp", "-rp", "cdisc-adamig-1-3,pmda-adamig-1-3");
-        assertEquals(java.util.List.of("cdisc-adamig-1-3", "pmda-adamig-1-3"),
-                rulesPackages(parsed), "-rp must split on comma and preserve the user order");
+        assertEquals(List.of("cdisc-adamig-1-3", "pmda-adamig-1-3"), rulesPackages(parsed),
+                "-rp must split on comma and preserve the user order");
     }
 
 
@@ -274,8 +272,8 @@ class CdiscValidateArgsParseTest
     void parse_rulesPackage_repeatedFlagAppendsInOrder() throws Exception
     {
         Object parsed = parse("-d", "/tmp", "-rp", "cdisc-adamig-1-3", "-rp", "pmda-adamig-1-3");
-        assertEquals(java.util.List.of("cdisc-adamig-1-3", "pmda-adamig-1-3"),
-                rulesPackages(parsed), "R1: -rp must accept repetition as well as commas");
+        assertEquals(List.of("cdisc-adamig-1-3", "pmda-adamig-1-3"), rulesPackages(parsed),
+                "R1: -rp must accept repetition as well as commas");
     }
 
 
@@ -283,7 +281,7 @@ class CdiscValidateArgsParseTest
     void parse_rulesPackage_longFormAndInlineValue() throws Exception
     {
         Object parsed = parse("-d", "/tmp", "--rules-package=cdisc-adamig-1-3");
-        assertEquals(java.util.List.of("cdisc-adamig-1-3"), rulesPackages(parsed));
+        assertEquals(List.of("cdisc-adamig-1-3"), rulesPackages(parsed));
     }
 
 
@@ -296,7 +294,7 @@ class CdiscValidateArgsParseTest
     void parse_rulesPackage_isNotClusteredAsDashR() throws Exception
     {
         Object parsed = parse("-d", "/tmp", "-rp", "cdisc-adamig-1-3");
-        assertEquals(java.util.List.of("cdisc-adamig-1-3"), rulesPackages(parsed));
+        assertEquals(List.of("cdisc-adamig-1-3"), rulesPackages(parsed));
         assertTrue(includeRules(parsed).isEmpty(),
                 "-rp must not land in includeRules via -r clustering");
     }
@@ -307,25 +305,25 @@ class CdiscValidateArgsParseTest
 
 
     @SuppressWarnings("unchecked")
-    private static java.util.List<String> rulesPackages(Object parsedArgs) throws Exception
+    private static List<String> rulesPackages(Object parsedArgs) throws Exception
     {
-        return (java.util.List<String>) parsedArgs.getClass().getDeclaredField("rulesPackages")
+        return (List<String>) parsedArgs.getClass().getDeclaredField("rulesPackages")
                 .get(parsedArgs);
     }
 
 
     @SuppressWarnings("unchecked")
-    private static java.util.List<String> includeRules(Object parsedArgs) throws Exception
+    private static List<String> includeRules(Object parsedArgs) throws Exception
     {
-        return (java.util.List<String>) parsedArgs.getClass().getDeclaredField("includeRules")
+        return (List<String>) parsedArgs.getClass().getDeclaredField("includeRules")
                 .get(parsedArgs);
     }
 
 
     @SuppressWarnings("unchecked")
-    private static java.util.List<String> metadataProducts(Object parsedArgs) throws Exception
+    private static List<String> metadataProducts(Object parsedArgs) throws Exception
     {
-        return (java.util.List<String>) parsedArgs.getClass().getDeclaredField("metadataProducts")
+        return (List<String>) parsedArgs.getClass().getDeclaredField("metadataProducts")
                 .get(parsedArgs);
     }
 
@@ -409,11 +407,9 @@ class CdiscValidateArgsParseTest
     @Test
     void parse_seedCacheFromApi_defaultsOffAndParses() throws Exception
     {
-        org.junit.jupiter.api.Assertions.assertFalse(
-                booleanField(parse("-d", "/tmp"), "seedCacheFromApi"),
+        assertFalse(booleanField(parse("-d", "/tmp"), "seedCacheFromApi"),
                 "absent --seed-cache-from-api leaves the flag off");
-        org.junit.jupiter.api.Assertions.assertTrue(
-                booleanField(parse("-d", "/tmp", "--seed-cache-from-api"), "seedCacheFromApi"));
+        assertTrue(booleanField(parse("-d", "/tmp", "--seed-cache-from-api"), "seedCacheFromApi"));
     }
 
 
@@ -422,14 +418,13 @@ class CdiscValidateArgsParseTest
      * must not lose the documented Python-CLI tuple form, which is the reason the regex was ever a
      * search rather than a full match.
      */
-    @org.junit.jupiter.api.Test
+    @Test
     void maxErrorsPerRule_acceptsAPlainIntegerAndThePythonTupleForm() throws Exception
     {
-        assertEquals(Integer.valueOf(5), maxErrorsPerRule(parse("-d", "/tmp", "-me", "5")));
-        assertEquals(Integer.valueOf(5), maxErrorsPerRule(parse("-d", "/tmp", "-me", "(5, True)")));
-        assertEquals(Integer.valueOf(5),
-                maxErrorsPerRule(parse("-d", "/tmp", "-me", " (5,False) ")));
-        assertEquals(Integer.valueOf(0), maxErrorsPerRule(parse("-d", "/tmp", "-me", "0")));
+        assertEquals(5, maxErrorsPerRule(parse("-d", "/tmp", "-me", "5")));
+        assertEquals(5, maxErrorsPerRule(parse("-d", "/tmp", "-me", "(5, True)")));
+        assertEquals(5, maxErrorsPerRule(parse("-d", "/tmp", "-me", " (5,False) ")));
+        assertEquals(0, maxErrorsPerRule(parse("-d", "/tmp", "-me", "0")));
     }
 
 
@@ -439,15 +434,14 @@ class CdiscValidateArgsParseTest
      * element was {@code [A-Za-z]+}, which accepts {@code "(5, banana)"}. Half a tuple is a typo,
      * and the cap decides how many findings per rule are materialised — a result change.
      */
-    @org.junit.jupiter.api.Test
+    @Test
     void maxErrorsPerRule_halfATupleOrANonBooleanFlagIsAUsageError()
     {
-        for (String bad : java.util.List.of("(5", "5)", "(5, True", "5, True)", "(5, banana)",
-                "(5 5)"))
+        for (String bad : List.of("(5", "5)", "(5, True", "5, True)", "(5, banana)", "(5 5)"))
         {
-            Exception thrown = org.junit.jupiter.api.Assertions.assertThrows(Exception.class,
-                    () -> parse("-d", "/tmp", "-me", bad), "accepted as a cap: " + bad);
-            org.junit.jupiter.api.Assertions.assertTrue(
+            Exception thrown = assertThrows(Exception.class, () -> parse("-d", "/tmp", "-me", bad),
+                    "accepted as a cap: " + bad);
+            assertTrue(
                     String.valueOf(thrown.getMessage()).contains("--max-errors-per-rule")
                             || String.valueOf(thrown.getCause()).contains("--max-errors-per-rule"),
                     () -> "not reported as a --max-errors-per-rule usage error: " + bad + " -> "

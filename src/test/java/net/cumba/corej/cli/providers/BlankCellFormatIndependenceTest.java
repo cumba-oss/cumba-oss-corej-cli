@@ -287,16 +287,13 @@ class BlankCellFormatIndependenceTest
                                 + ": character column " + col.getName() + " row " + row);
                     }
                 }
-                else if (col.getType() == DataValueType.DOUBLE
-                        || col.getType() == DataValueType.LONG)
+                else if ((col.getType() == DataValueType.DOUBLE
+                        || col.getType() == DataValueType.LONG) && dv.isMissingOrInvalid())
                 {
-                    if (dv.isMissingOrInvalid())
-                    {
-                        missingNumericCells++;
-                        assertTrue(table.isEmptyOrMissing(row, colIdx),
-                                () -> aFormat + ": a missing numeric cell must also be blank ("
-                                        + col.getName() + " row " + row + ")");
-                    }
+                    missingNumericCells++;
+                    assertTrue(table.isEmptyOrMissing(row, colIdx),
+                            () -> aFormat + ": a missing numeric cell must also be blank ("
+                                    + col.getName() + " row " + row + ")");
                 }
             }
         }
