@@ -1306,6 +1306,9 @@ public final class CdiscValidate
                 // prints, so the operator is told what DID land. The exit code stays 1.
                 try
                 {
+                    // Ownership passes to DictionaryInstaller.install, which closes the source in
+                    // its own try-with-resources; every type reaching it has a converter.
+                    @SuppressWarnings("PMD.CloseResource")
                     DictionarySource source;
                     if (!e.getValue().isBlank())
                     {
@@ -1708,7 +1711,7 @@ public final class CdiscValidate
         catch (IllegalArgumentException e)
         {
             throw new UsageException(
-                    e.getMessage() + " (acceptable product families: SDTM/SEND, ADaM, TIG)");
+                    e.getMessage() + " (acceptable product families: SDTM/SEND, ADaM, TIG)", e);
         }
     }
 
@@ -1961,7 +1964,7 @@ public final class CdiscValidate
             // would have silently reclassified errors the first time one was reworded.
             String message = e.getMessage();
             throw new UsageException(
-                    message != null ? message : "invalid Define-XML rule selection");
+                    message != null ? message : "invalid Define-XML rule selection", e);
         }
 
         Path target = outputBase.resolveSibling(fileName(outputBase) + ".define.json");
@@ -3033,16 +3036,17 @@ public final class CdiscValidate
             }
             catch (CommandLine.UnmatchedArgumentException e)
             {
-                throw new UsageException("Unknown option: " + String.join(", ", e.getUnmatched()));
+                throw new UsageException("Unknown option: " + String.join(", ", e.getUnmatched()),
+                        e);
             }
             catch (CommandLine.MissingParameterException e)
             {
-                throw new UsageException("Missing value for an option: " + e.getMessage());
+                throw new UsageException("Missing value for an option: " + e.getMessage(), e);
             }
             catch (CommandLine.ParameterException e)
             {
                 String message = e.getMessage();
-                throw new UsageException(message != null ? message : "invalid argument");
+                throw new UsageException(message != null ? message : "invalid argument", e);
             }
 
             if (a.help)
@@ -3083,7 +3087,7 @@ public final class CdiscValidate
                 catch (NumberFormatException nfe)
                 {
                     throw new UsageException(
-                            "--threads expects a positive integer, got: " + a.threadsRaw);
+                            "--threads expects a positive integer, got: " + a.threadsRaw, nfe);
                 }
                 if (a.ruleThreads < 1)
                 {
@@ -3245,6 +3249,12 @@ public final class CdiscValidate
         UsageException(String message)
         {
             super(message);
+        }
+
+
+        UsageException(String message, Throwable cause)
+        {
+            super(message, cause);
         }
     }
 }
