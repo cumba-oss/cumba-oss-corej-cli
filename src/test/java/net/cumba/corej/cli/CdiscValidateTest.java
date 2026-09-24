@@ -716,6 +716,45 @@ class CdiscValidateTest
         Path report = tempDir.resolve("dup.json");
 
         Captured cap = capture();
+        // The report cannot tell a skipped duplicate from a registered one (a reference dataset
+        // is never validated, so DM reports from the primary either way). The skip is observable
+        // only through StudyValidationService's INFO line, so collect that logger's INFO output.
+        // The strong local reference also keeps the JUL logger (weakly held by the LogManager)
+        // alive for the whole run.
+        java.util.logging.Logger serviceLog = java.util.logging.Logger
+                .getLogger(net.cumba.corej.core.run.StudyValidationService.class.getName());
+        List<String> serviceInfo = java.util.Collections.synchronizedList(new ArrayList<>());
+        java.util.logging.Handler infoHandler = new java.util.logging.Handler()
+        {
+
+            @Override
+            public void publish(java.util.logging.LogRecord aRecord)
+            {
+                if (aRecord.getLevel().intValue() >= java.util.logging.Level.INFO.intValue())
+                {
+                    serviceInfo.add(java.text.MessageFormat
+                            .format(String.valueOf(aRecord.getMessage()), aRecord.getParameters()));
+                }
+            }
+
+
+            @Override
+            public void flush()
+            {
+                // nothing buffered
+            }
+
+
+            @Override
+            public void close()
+            {
+                // nothing to release
+            }
+        };
+        infoHandler.setLevel(java.util.logging.Level.ALL);
+        java.util.logging.Level previousLevel = serviceLog.getLevel();
+        serviceLog.addHandler(infoHandler);
+        serviceLog.setLevel(java.util.logging.Level.INFO);
         // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
         // know that, and a value that would silently satisfy the assertions is the last thing
         // this file needs.
@@ -746,9 +785,24 @@ class CdiscValidateTest
             Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
                     + ex.getMessage());
         }
+        finally
+        {
+            serviceLog.removeHandler(infoHandler);
+            serviceLog.setLevel(previousLevel);
+        }
 
         assertEquals(0, rc, cap.errAsString());
         assertTrue(Files.exists(report), "JSON report must be written");
+        // ⭐ The discriminating assertion: the duplicate reference DM was SKIPPED, by the
+        // duplicate-domain branch of loadReferenceLibrary, and nothing else was.
+        List<String> skipped = serviceInfo.stream()
+                .filter(l -> l.contains("[reference-data] skipped")).toList();
+        assertEquals(1, skipped.size(), () -> "exactly one reference domain must be skipped; INFO "
+                + "lines: " + serviceInfo);
+        assertTrue(
+                skipped.get(0).toUpperCase(Locale.ROOT).contains("SKIPPED DM ")
+                        && skipped.get(0).contains("domain already loaded from primary library"),
+                () -> "the skip must name DM as already loaded: " + skipped.get(0));
         // The reference library's DM duplicates the primary's and is skipped: DM is validated
         // once, and from the primary library.
         assertEquals(List.of("DM", "VS"), reportedDomains(report).stream().sorted().toList());
