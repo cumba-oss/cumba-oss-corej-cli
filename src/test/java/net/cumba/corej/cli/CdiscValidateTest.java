@@ -1311,7 +1311,8 @@ class CdiscValidateTest
         int dash = base.indexOf('-');
         new net.cumba.corej.core.RulePackageManifest("test",
                 List.of(new net.cumba.corej.core.RulePackageManifest.Entry(n, "CDISC",
-                        base.substring(0, dash), base.substring(dash + 1), 1))).writeTo(rulesDir);
+                        base.substring(0, dash), base.substring(dash + 1), 1, java.util.List.of())))
+                                .writeTo(rulesDir);
     }
 
 

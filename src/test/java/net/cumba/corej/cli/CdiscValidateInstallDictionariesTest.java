@@ -815,8 +815,8 @@ class CdiscValidateInstallDictionariesTest
         Files.writeString(rulesFile, rulesJson);
         new net.cumba.corej.core.RulePackageManifest("test",
                 java.util.List.of(new net.cumba.corej.core.RulePackageManifest.Entry(
-                        rulesFile.getFileName().toString(), "CDISC", "sdtmig", "3-4", 1)))
-                                .writeTo(rulesDir);
+                        rulesFile.getFileName().toString(), "CDISC", "sdtmig", "3-4", 1,
+                        java.util.List.of()))).writeTo(rulesDir);
 
         try (PrintStream o = new PrintStream(new ByteArrayOutputStream(), true,
                 StandardCharsets.UTF_8);
