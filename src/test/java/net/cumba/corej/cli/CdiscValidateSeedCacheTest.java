@@ -297,9 +297,10 @@ class CdiscValidateSeedCacheTest
 
 
     /**
-     * Engine L4 (review round 1): a short {@code -mp} key against an OLD-FORMAT store is refused
-     * naming the store's format and this surface's remedy — not "cannot be resolved: no product
-     * catalogue", which is what "no store configured" looks like.
+     * Engine L4 (review round 1): a SHORT {@code -mp} key ({@code 3-4}, a bare suffix that needs
+     * the catalogue; review round 2 M-MP exempts full-form keys) against an OLD-FORMAT store is
+     * refused naming the store's format and this surface's remedy — not "cannot be resolved: no
+     * product catalogue", which is what "no store configured" looks like.
      */
     @Test
     void aShortProductKeyAgainstAnOldFormatStoreNamesTheFormatProblem(@TempDir Path root)
@@ -312,7 +313,7 @@ class CdiscValidateSeedCacheTest
         relabelFormatVersion(store, 1);
         Path data = Files.createDirectory(root.resolve("data"));
 
-        Run run = invoke("-d", data.toString(), "-mp", "sdtmig/3-4", "-ca", store.toString(), "-o",
+        Run run = invoke("-d", data.toString(), "-mp", "3-4", "-ca", store.toString(), "-o",
                 root.resolve("mp.json").toString(), "--rules-dir", root.toString());
 
         assertEquals(2, run.exitCode(), run.err());

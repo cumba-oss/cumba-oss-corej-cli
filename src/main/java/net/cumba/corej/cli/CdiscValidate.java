@@ -427,14 +427,16 @@ public final class CdiscValidate
             // D3 for the store itself (review round 1, L5): a store NAMED with -ca that does not
             // exist aborts, naming the file — never a silent "no metadata store is configured".
             // --seed-cache is the one mode whose -ca may not exist yet (it is the seed target).
+            // --install-dictionaries never reads the store either (review round 2, L3).
             boolean seeding = parsed.seedCache != null || parsed.seedCacheFromDir != null
                     || parsed.seedCacheFromApi;
             if (parsed.cache != null && !parsed.cache.isBlank() && !seeding
-                    && !Files.isRegularFile(Path.of(parsed.cache)))
+                    && !parsed.installDictionaries && !Files.isRegularFile(Path.of(parsed.cache)))
             {
-                err.println("Error: the metadata store given by -ca does not exist: "
-                        + Path.of(parsed.cache).toAbsolutePath()
-                        + ". Seed one there with --seed-cache, or name an existing store.");
+                Path named = Path.of(parsed.cache).toAbsolutePath();
+                err.println("Error: the metadata store given by -ca "
+                        + (Files.isDirectory(named) ? "is not a file: " : "does not exist: ")
+                        + named + ". Seed one there with --seed-cache, or name an existing store.");
                 return 2;
             }
             Runnable restoreStore = applyMetadataStoreConfiguration(parsed.cache);
@@ -1149,7 +1151,14 @@ public final class CdiscValidate
         }
         catch (IOException | RuntimeException e)
         {
-            aErr.println("Error: metadata store seeding failed: " + e.getMessage());
+            // The engine's refusal to overwrite a NEWER-build store is neutral (review round 2,
+            // M-NEWER d); this surface names its own explicit-refresh switch.
+            String remedy = e.getCause() instanceof StoreFormatException sf
+                    && sf.writtenByNewerBuild()
+                            ? " Pass --seed-overwrite to replace it deliberately, or upgrade"
+                                    + " this tool."
+                            : "";
+            aErr.println("Error: metadata store seeding failed: " + e.getMessage() + remedy);
             LOGGER.log(System.Logger.Level.DEBUG, "metadata store seeding failed", e);
             return 1;
         }
@@ -1713,12 +1722,15 @@ public final class CdiscValidate
      */
     private static List<String> resolveMetadataProducts(Args args)
     {
-        if (!args.metadataProducts.isEmpty())
+        if (args.metadataProducts.stream().anyMatch(ProductKeyResolver::isShortForm))
         {
-            // Review round 1 (engine L4): a short -mp key against an old-format store used to
+            // Review round 1 (engine L4): a SHORT -mp key against an old-format store used to
             // fail as "cannot be resolved: no product catalogue" — the store's format is the
-            // cause, and this surface's remedy is --seed-cache.
-            StoreFormatException oldFormat = MetadataProductCatalogue.configured()
+            // cause, and this surface's remedy is --seed-cache. Review round 2 (M-MP): read
+            // against the store the RUN resolves (-ca first, then the ambient configuration),
+            // and only when a token actually needs the catalogue - a full-form key resolves
+            // verbatim and must not be vetoed by a store the run will not read.
+            StoreFormatException oldFormat = MetadataProductCatalogue.configuredFrom(args.cache)
                     .storeFormatProblem();
             if (oldFormat != null)
             {
@@ -1728,7 +1740,7 @@ public final class CdiscValidate
         }
         try
         {
-            return ProductKeyResolver.resolveAllConfigured(args.metadataProducts);
+            return ProductKeyResolver.resolveAllConfigured(args.metadataProducts, args.cache);
         }
         catch (IllegalArgumentException e)
         {

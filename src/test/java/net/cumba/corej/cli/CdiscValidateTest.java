@@ -466,6 +466,78 @@ class CdiscValidateTest
     }
 
 
+    /**
+     * Review round 2 (M-MP): the -mp pre-check reads the store the RUN resolves. An ambient
+     * old-format store (the property tier) beside an explicit -ca store of this format must not
+     * veto a full-form -mp key - the run reads -ca, and a full-form key needs no catalogue.
+     */
+    @Test
+    void aFullFormProductKeyWithAnExplicitStore_isNotVetoedByAnAmbientOldStore() throws Exception
+    {
+        Path source = makeSourceFolderWithCsv();
+        Path rulesDir = Files.createDirectory(tempDir.resolve("rules-" + System.nanoTime()));
+        Path rulesFile = rulesDir.resolve("rules-sdtmig-3-4.json");
+        Files.writeString(rulesFile, """
+                {
+                  "rules": {
+                    "u1": {
+                      "id": "u1",
+                      "Core": {"Id": "CORE-TEST-001"},
+                      "Sensitivity": "Record",
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
+                    }
+                  }
+                }
+                """);
+        writeCdiscManifest(rulesDir, rulesFile);
+        Path explicit = CdiscValidateDefineXmlTest.store(tempDir);
+        Path ambient = Files.copy(explicit, tempDir.resolve("ambient-old.zip"));
+        CdiscValidateSeedCacheTest.relabelFormatVersion(ambient, 1);
+        String saved = System.getProperty(
+                net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY);
+        System.setProperty(
+                net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY,
+                ambient.toString());
+        try
+        {
+            Path report = tempDir.resolve("mp-explicit.json");
+            Captured cap = capture();
+            int rc = OfflineCli.run(new String[]
+            {
+                    "-d", source.toString(), "-o", report.toString(), "-rp", "sdtmig-3-4", "-mp",
+                    "sdtmig/3-4", "--rules-dir", rulesDir.toString(), "-ca", explicit.toString()
+            }, cap.out, cap.err);
+            assertEquals(0, rc, cap.errAsString());
+            assertTrue(Files.exists(report), "the run reads the explicit store and completes");
+            assertFalse(cap.errAsString().contains("is format 1"), cap.errAsString());
+
+            // The same run WITHOUT -ca reads the ambient store and aborts on its format.
+            Captured cap2 = capture();
+            int rc2 = OfflineCli.run(new String[]
+            {
+                    "-d", source.toString(), "-o", tempDir.resolve("mp-ambient.json").toString(),
+                    "-rp", "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
+            }, cap2.out, cap2.err);
+            assertEquals(2, rc2, cap2.errAsString());
+            assertTrue(cap2.errAsString().contains("is format 1"), cap2.errAsString());
+        }
+        finally
+        {
+            if (saved == null)
+            {
+                System.clearProperty(
+                        net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY);
+            }
+            else
+            {
+                System.setProperty(
+                        net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY,
+                        saved);
+            }
+        }
+    }
+
+
     @Test
     void run_endToEnd_minimalRulePackage_writesReportAndRuntimeCsv() throws Exception
     {

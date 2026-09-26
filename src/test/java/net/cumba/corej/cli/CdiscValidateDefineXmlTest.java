@@ -565,6 +565,29 @@ class CdiscValidateDefineXmlTest
         assertTrue(err.contains("does not exist"), err);
         assertTrue(err.contains(missing.toAbsolutePath().toString()), err);
         assertTrue(!err.contains("no metadata store is configured"), err);
+
+        // Review round 2 (L3): a DIRECTORY is refused as "is not a file", not "does not exist".
+        Path dir = Files.createDirectory(tempDir.resolve("a-directory"));
+        Captured cap2 = new Captured();
+        int rc2 = OfflineCli.run(new String[]
+        {
+                "-vx", "-d", data.toString(), "-dxp", ctFixture().toString(), "-o",
+                tempDir.resolve("nocadir.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                dir.toString()
+        }, cap2.out, cap2.err);
+        assertEquals(2, rc2);
+        assertTrue(cap2.errAsString().contains("is not a file: " + dir.toAbsolutePath()),
+                cap2.errAsString());
+
+        // --install-dictionaries never reads the store, so a missing -ca is not its concern.
+        Captured cap3 = new Captured();
+        OfflineCli.run(new String[]
+        {
+                "--install-dictionaries", "--dictionaries-dir", tempDir.resolve("dict").toString(),
+                "-ca", missing.toString()
+        }, cap3.out, cap3.err);
+        assertTrue(!cap3.errAsString().contains("given by -ca"), cap3.errAsString());
     }
 
 
