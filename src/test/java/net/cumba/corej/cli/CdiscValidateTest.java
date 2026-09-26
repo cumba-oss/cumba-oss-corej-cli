@@ -126,6 +126,23 @@ class CdiscValidateTest
     }
 
 
+    /** PLAN-use-case-scope-filter T1-3: a use-case LIST is a usage error, exit 2, value named. */
+    @Test
+    void run_useCaseList_returns2() throws Exception
+    {
+        Captured cap = capture();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-uc", "INDH, PROD", "-d", "/tmp"
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertTrue(cap.errAsString().contains("the use case must be a single code"),
+                cap.errAsString());
+        assertTrue(cap.errAsString().contains("'INDH, PROD'"), cap.errAsString());
+    }
+
+
     /**
      * ⛔ Plan 2 (R5): {@code -s} / {@code --standard} was removed. The old subject here was
      * "--standard and --version are required"; the successor is that the flag is refused by name

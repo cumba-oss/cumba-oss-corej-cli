@@ -2,6 +2,7 @@ package net.cumba.corej.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -344,6 +345,49 @@ class CdiscValidateArgsParseTest
         Method m = argsCls.getDeclaredMethod("parse", String[].class, PrintStream.class);
         m.setAccessible(true);
         return m.invoke(null, argv, err);
+    }
+
+
+    private static Object useCase(Object args) throws Exception
+    {
+        var f = args.getClass().getDeclaredField("useCase");
+        f.setAccessible(true);
+        return f.get(args);
+    }
+
+    // ------------------------------------------------------------------
+    // PLAN-use-case-scope-filter T1-3 — -uc is trimmed, blank is none, one code only
+    // ------------------------------------------------------------------
+
+
+    @Test
+    void parse_useCase_isTrimmed() throws Exception
+    {
+        assertEquals("INDH", useCase(parse("-d", "/tmp", "-uc", "  INDH ")));
+        assertEquals("nonclin", useCase(parse("-d", "/tmp", "--use-case", "nonclin")),
+                "case is the engine's business (it compares case-insensitively)");
+    }
+
+
+    @Test
+    void parse_blankUseCase_isNone() throws Exception
+    {
+        assertNull(useCase(parse("-d", "/tmp", "-uc", "   ")));
+        assertNull(useCase(parse("-d", "/tmp")));
+    }
+
+
+    @Test
+    void parse_aUseCaseThatIsNotOneCode_throwsUsage_namingTheValue()
+    {
+        for (String bad : List.of("INDH, PROD", "INDH,PROD", "IN DH", "INDH;"))
+        {
+            InvocationTargetException ite = assertThrows(InvocationTargetException.class,
+                    () -> parse("-d", "/tmp", "-uc", bad), bad);
+            String msg = ite.getCause().getMessage();
+            assertTrue(msg.startsWith("-uc / --use-case: the use case must be a single code"), msg);
+            assertTrue(msg.contains("'" + bad + "'"), msg);
+        }
     }
 
 

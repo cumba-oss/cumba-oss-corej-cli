@@ -115,7 +115,9 @@ import picocli.CommandLine.ParseResult;
  *                                          metadata, highest precedence first (metadata only;
  *                                          rules stay on -s/-v). Default: the product implied
  *                                          by -s/-v.
- *   -uc, --use-case &lt;uc&gt;                  TIG use case
+ *   -uc, --use-case &lt;uc&gt;                  the run's use case, one code (e.g. INDH, PROD,
+ *                                          NONCLIN): rules whose Scope.Use_Case names only
+ *                                          other use cases are reported SKIPPED
  *   -ct, --controlled-terminology-package &lt;pkg&gt;
  *                                         CT package id, repeatable. Governs the dataset run AND
  *                                         -vx (an explicit list replaces the define's declared
@@ -2360,7 +2362,11 @@ public final class CdiscValidate
         out.println("                                   unambiguous). Metadata only - rules are");
         out.println("                                   selected by -rp. Default: the standards");
         out.println("                                   the selected packages declare.");
-        out.println("  -uc, --use-case <uc>             TIG use case");
+        out.println("  -uc, --use-case <uc>             the run's use case, one code (e.g. INDH,");
+        out.println(
+                "                                   PROD, NONCLIN): rules whose Scope.Use_Case");
+        out.println("                                   names only other use cases are reported");
+        out.println("                                   SKIPPED");
         out.println("  --define-first                   prefer declared define.xml class/subclass "
                 + "over heuristics (the default)");
         out.println("  -ct, --controlled-terminology-package <pkg>");
@@ -2510,7 +2516,10 @@ public final class CdiscValidate
         @Option(names =
         {
                 "-uc", "--use-case"
-        })
+        }, description = "The run's use case, one code of letters (e.g. INDH, PROD, NONCLIN). "
+                + "Rules whose Scope.Use_Case names only other use cases are not executed and "
+                + "are reported SKIPPED; a rule naming none runs under every use case. The value "
+                + "is also echoed as the report's TIG_Use_Case.")
         @Nullable
         String useCase;
 
@@ -3153,6 +3162,17 @@ public final class CdiscValidate
                         + "product. Give at least one product key (e.g. adam/adamig-1-3), or "
                         + "omit the flag to run with the standards the selected rule packages "
                         + "declare.");
+            }
+
+            // PLAN-use-case-scope-filter T1-3: trim, blank = none, and anything that is not ONE
+            // code fails here — before a local run AND before a remote request is built, so both
+            // paths reject it alike. "-uc 'INDH, PROD'" used to reach the engine as one code and
+            // would now exclude every rule that declares a use case.
+            a.useCase = StudyValidationParams.normalizeUseCase(a.useCase);
+            if (a.useCase != null && !StudyValidationParams.isWellFormedUseCase(a.useCase))
+            {
+                throw new UsageException(
+                        "-uc / --use-case: " + StudyValidationParams.useCaseError(a.useCase));
             }
 
             if (a.threadsRaw != null)
