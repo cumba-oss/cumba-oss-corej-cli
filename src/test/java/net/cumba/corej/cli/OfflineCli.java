@@ -24,8 +24,11 @@ import net.cumba.corej.core.metadata.dictionary.DictionarySource;
  *
  * <p>
  * A test that genuinely wants a download source injects its own
- * {@link CdiscValidate.DictionaryDownloads} through the four-argument overload; a test that wants
+ * {@link CdiscValidate.DictionaryDownloads} through the five-argument overload; a test that wants
  * the production wiring asserts {@link CdiscValidate#httpDownloads()} directly, without running it.
+ * ⚑ The Library seam this class used to route ({@code LibraryAccess}) went with the API-backed
+ * Define-XML library provider (PLAN-define-ct-evaluation T1-8 a): the define run reads the metadata
+ * store, and a test hands it one with {@code -ca}.
  * </p>
  */
 final class OfflineCli
@@ -60,21 +63,7 @@ final class OfflineCli
     /** As {@code CdiscValidate.run(args, out, err)}, but with {@link #DENIED} downloads. */
     static int run(String[] aArgs, PrintStream aOut, PrintStream aErr) throws Exception
     {
-        return CdiscValidate.run(aArgs, aOut, aErr, DENIED, CdiscValidate.configuredLibrary(),
-                NO_ARCHIVE);
-    }
-
-
-    /**
-     * As {@link #run(String[], PrintStream, PrintStream)}, but with the CDISC Library provider
-     * supplied by the caller — the only way to drive the degraded-Library surface without a live
-     * outage and a configured API key.
-     */
-    static int run(String[] aArgs, PrintStream aOut, PrintStream aErr,
-            CdiscValidate.LibraryAccess aLibrary)
-        throws Exception
-    {
-        return CdiscValidate.run(aArgs, aOut, aErr, DENIED, aLibrary, NO_ARCHIVE);
+        return CdiscValidate.run(aArgs, aOut, aErr, DENIED, NO_ARCHIVE);
     }
 
 

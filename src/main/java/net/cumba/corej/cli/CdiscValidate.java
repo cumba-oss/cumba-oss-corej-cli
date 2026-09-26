@@ -19,7 +19,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import net.cumba.cdisc.library.api.client.CdiscLibraryClient;
 import net.cumba.corej.core.CoreLibraryAccess;
 import net.cumba.corej.core.metadata.dictionary.DictionaryConverter;
 import net.cumba.corej.core.metadata.dictionary.DictionaryDirectoryResolver;
@@ -51,6 +50,7 @@ import net.cumba.corej.core.report.ReportManager;
 import net.cumba.corej.core.report.ReportSections;
 import net.cumba.corej.core.report.ServiceReportManager;
 import net.cumba.corej.core.run.DatasetExecutionSummary;
+import net.cumba.corej.core.run.DefineStoreBinding;
 import net.cumba.corej.core.run.StudyValidationException;
 import net.cumba.corej.core.run.StudyValidationParams;
 import net.cumba.corej.core.run.StudyValidationResult;
@@ -65,7 +65,6 @@ import net.cumba.datatable.io.Property;
 import net.cumba.datatable.manager.IDataTableManager;
 import net.cumba.datatable.manager.local.LocalDataTableManager;
 import net.cumba.datatable.metadatacache.MetadataCacheLocator;
-import net.cumba.web.api.cache.GzipFileApiCache;
 import org.jspecify.annotations.Nullable;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -116,7 +115,10 @@ import picocli.CommandLine.ParseResult;
  *                                          by -s/-v.
  *   -uc, --use-case &lt;uc&gt;                  TIG use case
  *   -ct, --controlled-terminology-package &lt;pkg&gt;
- *                                         CT package id, repeatable
+ *                                         CT package id, repeatable. Governs the dataset run AND
+ *                                         -vx (an explicit list replaces the define's declared
+ *                                         CT); a named package the store lacks ABORTS the whole
+ *                                         invocation (exit 2, no report of either kind)
  *   -dv, --define-version &lt;ver&gt;           Define-XML version (2-1, 2.0); selects the
  *                                         rule package, so a bogus value is an error
  *        --define-family &lt;sheet&gt;           REQUIRED for -vx: CDISC and/or PMDA
@@ -199,9 +201,13 @@ import picocli.CommandLine.ParseResult;
  * index</b> must be updated; stored {@code *.runtime.csv} files written by earlier versions still
  * carry the old 9-column header.
  *
- * <h2>Authentication</h2> Reads the CDISC Library API key from the {@code CDISC_API_KEY}
- * environment variable, falling back to the {@code cdisc.library.api.key} system property. Without
- * an API key, library metadata enrichment is skipped and the validation may produce SKIPPED rules.
+ * <h2>Authentication</h2> A CDISC Library API key ({@code CDISC_API_KEY} environment variable,
+ * falling back to the {@code cdisc.library.api.key} system property) is needed for
+ * {@code --seed-cache-from-api} ONLY. Validation — the dataset run and the Define-XML conformance
+ * run ({@code -vx}) alike, its {@code Requires: library} and {@code Requires: ct} rules included —
+ * reads the unified metadata store ({@code -ca}, {@code CDISC_METADATA_STORE},
+ * {@code cdisc.metadata.store}, else the seeded default) and never the live API; without a store
+ * the store-dependent rules SKIP, named on the "CT basis:" / "Library basis:" stderr lines.
  */
 @lombok.CustomLog
 public final class CdiscValidate
@@ -235,10 +241,8 @@ public final class CdiscValidate
     private static final String SP_UNII_ARCHIVE_URL = "corej.dictionaries.uniiArchiveUrl";
 
     /**
-     * The dictionary <b>download</b> seam — the same shape as
-     * {@code CdiscLibraryBackedLibraryProvider.ProductSource}, and package-visible for the same
-     * reason: so a test can hand the installer a canned or a deliberately-failing source instead of
-     * letting it reach the public internet.
+     * The dictionary <b>download</b> seam — package-visible so a test can hand the installer a
+     * canned or a deliberately-failing source instead of letting it reach the public internet.
      *
      * <p>
      * ⚠ This is not a convenience. {@code installTargetDir} ends at the CWD-relative
@@ -268,35 +272,6 @@ public final class CdiscValidate
 
 
     /**
-     * How a Define-XML run obtains its CDISC Library provider. Package-visible for the same reason
-     * as {@link DictionaryDownloads}: {@link #printLibraryBasis} is only reachable with a provider
-     * that has actually recorded a failed lookup, and building one used to require a configured API
-     * key plus a real Library outage. Nothing short of that could pin the <b>call site</b> — the
-     * method itself was extracted and tested (C2-04), but every covering case ran with
-     * {@code apiKey == null}, so the provider was {@code null}, {@code printLibraryBasis} returned
-     * at its first {@code if}, and deleting the call from {@link #runDefineConformance} changed no
-     * assertion (C3-02).
-     */
-    interface LibraryAccess
-    {
-
-        /**
-         * Returns the CDISC Library provider for this run, if one is configured.
-         *
-         * @param aCacheDir
-         *            an HTTP response cache directory, or {@code null} for the shared default
-         *            ({@code CDISC_API_CACHE} / {@code ~/.cdiscApiCache}). ⚠ Not {@code -ca}: that
-         *            names the unified metadata store since cache 8b-1, and production passes
-         *            {@code null} here.
-         * @return the provider for this run, or {@code null} when no Library access is configured
-         *         and no lookup will be attempted.
-         */
-        @Nullable
-        CdiscLibraryBackedLibraryProvider provider(@Nullable String aCacheDir);
-    }
-
-
-    /**
      * Where a {@code --seed-cache} run fetches the Python engine's pickle archive from. The same
      * seam as {@link DictionaryDownloads}, for the same reason and against the same mutant shape:
      * negating {@code if (aArgs.seedCacheFromDir != null)} in {@link #buildPickleSource} sends a
@@ -318,14 +293,13 @@ public final class CdiscValidate
     /** The pickle-archive seam in force for this invocation; never {@code null}. */
     private final PickleArchives archives;
 
-    /** The Library seam in force for this invocation; never {@code null}. */
-    private final LibraryAccess library;
-
     /**
      * The only constructor: every outbound channel this CLI has is supplied by the caller. The
-     * production bindings ({@link #httpDownloads()}, {@link #configuredLibrary()},
-     * {@link #httpArchives()}) are chosen one level up, in
-     * {@link #run(String[], PrintStream, PrintStream)}.
+     * production bindings ({@link #httpDownloads()}, {@link #httpArchives()}) are chosen one level
+     * up, in {@link #run(String[], PrintStream, PrintStream)}. ⚑ The CDISC Library seam this class
+     * used to carry ({@code LibraryAccess}) went with the API-backed Define-XML library provider
+     * (PLAN-define-ct-evaluation T1-8 a): the define run reads the metadata store, like the dataset
+     * run, so no channel is left that needs a Library API key at validation time.
      *
      * <p>
      * ⚠ The no-arg, one-arg and two-arg constructors this class used to carry were deleted in round
@@ -333,10 +307,9 @@ public final class CdiscValidate
      * "Production binding" javadoc described a wiring nothing performed.
      * </p>
      */
-    CdiscValidate(DictionaryDownloads aDownloads, LibraryAccess aLibrary, PickleArchives aArchives)
+    CdiscValidate(DictionaryDownloads aDownloads, PickleArchives aArchives)
     {
         downloads = aDownloads;
-        library = aLibrary;
         archives = aArchives;
     }
 
@@ -346,30 +319,6 @@ public final class CdiscValidate
     {
         return (aRepo, aRef, aRepoPath, aTemplate, aWorkDir) -> new HttpArchivePickleSource(aRepo,
                 aRef, aRepoPath, aTemplate, aWorkDir);
-    }
-
-
-    /**
-     * The production {@link LibraryAccess}: a provider over a configured
-     * {@link CdiscLibraryClient}, or {@code null} when no API key is set.
-     */
-    static LibraryAccess configuredLibrary()
-    {
-        return aCacheDir ->
-        {
-            String apiKey = CdiscLibraryClient.getApiKey();
-            if (apiKey == null || apiKey.isBlank())
-            {
-                return null;
-            }
-            CdiscLibraryClient.CdiscBuilder client = CdiscLibraryClient.builder();
-            // An explicit dir in the Gzip format the seeding path writes, else the shared
-            // default cache (~/.cdiscApiCache) rather than the builder's no-op fallback.
-            client.cache(aCacheDir != null
-                    ? new GzipFileApiCache(Path.of(aCacheDir).toAbsolutePath(), ".json")
-                    : CdiscLibraryClient.getCache());
-            return CdiscLibraryBackedLibraryProvider.over(client.build());
-        };
     }
 
 
@@ -421,13 +370,13 @@ public final class CdiscValidate
      */
     static int run(String[] args, PrintStream out, PrintStream err) throws Exception
     {
-        return run(args, out, err, httpDownloads(), configuredLibrary(), httpArchives());
+        return run(args, out, err, httpDownloads(), httpArchives());
     }
 
 
     /** Entry point for tests that control every outbound channel this CLI has. */
     static int run(String[] args, PrintStream out, PrintStream err, DictionaryDownloads aDownloads,
-            LibraryAccess aLibrary, PickleArchives aArchives)
+            PickleArchives aArchives)
         throws Exception
     {
         Args parsed;
@@ -476,7 +425,7 @@ public final class CdiscValidate
             Runnable restoreStore = applyMetadataStoreConfiguration(parsed.cache);
             try
             {
-                return new CdiscValidate(aDownloads, aLibrary, aArchives).run(parsed, err);
+                return new CdiscValidate(aDownloads, aArchives).run(parsed, err);
             }
             finally
             {
@@ -1570,13 +1519,21 @@ public final class CdiscValidate
         Path outputBase = resolveOutputBase(args.output);
 
         // Phase 7: -vx / --validate-xml runs the standalone Define-XML conformance validator on the
-        // -dxp file, independent of the data validation below, and writes <base>.define.json. It
-        // runs first so the conformance report is produced even if the data validation later
-        // short-circuits (e.g. no rules selected). parse() has already guaranteed a -dxp path when
-        // the flag is set, and the file's existence was checked at the top of this method.
+        // -dxp file and writes <base>.define.json. It runs first so the conformance report is
+        // produced even if the data validation later short-circuits (e.g. no rules selected):
+        // that independence covers FINDINGS, not an abort. A CT package named for the define run
+        // (by the define's declaration or by -ct) that the store does not hold, or an old-format
+        // store, ends the WHOLE invocation here with exit 2 - no define report, no dataset run,
+        // no dataset report (PLAN-define-ct-evaluation T1-13 a; owner: "a run that fails is void
+        // and does not need to produce any result"). parse() has already guaranteed a -dxp path
+        // when the flag is set, and the file's existence was checked at the top of this method.
         if (args.validateXml)
         {
-            runDefineConformance(args, outputBase, err);
+            int defineRc = runDefineConformance(args, outputBase, err);
+            if (defineRc != 0)
+            {
+                return defineRc;
+            }
         }
 
         // Representative report path (drives the runtime-report file name, which is derived from
@@ -1622,7 +1579,7 @@ public final class CdiscValidate
             {
                 // Operational failure (no datasets, no rules, …). Stderr + exit so CLI users
                 // always see it regardless of log config.
-                err.println("Error: " + e.getMessage());
+                err.println("Error: " + withStoreRemedy(e));
                 return 2;
             }
         }
@@ -1901,18 +1858,25 @@ public final class CdiscValidate
      * JSON report to {@code <output-base>.define.json}.
      *
      * <p>
-     * <b>Controlled Terminology is intentionally not bound here.</b> The engine's
-     * {@code Requires: ct} skip gate keys off the <em>presence</em> of a {@code CtProvider}, not
-     * per-check capability: supplying any provider un-skips every CT-backed check at once. The CT
-     * checks that could be served soundly from the CLI's {@code MetadataProvider}
-     * ({@code term_in_ct_codelist} membership) share that provider with checks that cannot
-     * ({@code nci_code_known} / {@code term_matches_nci_code} need term-level NCI c-codes, which
-     * {@code MetadataProvider} does not expose; {@code extended_value_marking} needs the
-     * authoritative per-codelist extensible flag). Binding a partial provider would therefore turn
-     * clean SKIPs into false-positive findings for those checks. Correctness-first, we pass
-     * {@code null} so all {@code Requires: ct} rules SKIP ({@code SKIPPED_MISSING_CT}). A sound
-     * binding is a follow-up that needs both a {@code MetadataProvider} term-c-code extension and a
-     * per-check capability gate in the conformance engine.
+     * <b>Controlled Terminology and the IG library are bound from the unified metadata store</b>
+     * (PLAN-define-ct-evaluation): {@link DefineStoreBinding} resolves, from the store {@code -ca}
+     * / {@code CDISC_METADATA_STORE} / {@code cdisc.metadata.store} names (else the seeded
+     * default), the CT the run applies — an explicit {@code -ct} list outright, else the define's
+     * own {@code def:Standards} declaration (owner ruling D1), merged Define-XML CT first, newest
+     * first per root — and the store-backed library provider. A {@code Requires: ct} rule the bound
+     * CT cannot serve (an explicit c-code it lacks, a name-keyed rule) stays SKIPPED, never
+     * executes vacuously; with no store, or nothing named, the CT rules SKIP and the library rules
+     * SKIP, both said on stderr ("CT basis:" / "Library basis:"). No API key is involved anywhere
+     * on this path any more: the API-backed provider that once served the library rules only when
+     * {@code CDISC_API_KEY} was set is gone (T1-8 a), so the define run and the dataset run read
+     * the same store and cannot contradict each other.
+     * </p>
+     *
+     * <p>
+     * <b>Abort (T1-2 a, T1-13 a).</b> A CT package named for this run — declared by the define or
+     * given with {@code -ct} — that the store does not hold, or a store of another format version,
+     * aborts: the message goes to stderr, NO {@code report.define.json} is written, and the caller
+     * returns 2 immediately without starting the dataset run. The escape hatch is {@code -ct}.
      * </p>
      *
      * <p>
@@ -1921,27 +1885,15 @@ public final class CdiscValidate
      * define.xml's own parent directory.
      * </p>
      *
-     * <p>
-     * <b>The IG library IS bound</b> (unlike CT): {@code Requires: library} rules get a
-     * {@link CdiscLibraryBackedLibraryProvider} over the Library API whenever an API key is
-     * configured ({@code CDISC_API_KEY} / {@code cdisc.library.api.key} — the same signal that
-     * gates metadata enrichment), honouring the {@code -ca} cache directory. This is safe where the
-     * CT binding is not: the {@code LibraryProvider} SPI treats every empty answer as "out of the
-     * rule's reach", so a partial or failing provider can only under-report, never turn a clean
-     * SKIP into a false positive. Without an API key the library rules SKIP
-     * ({@code SKIPPED_MISSING_LIBRARY}).
-     * </p>
+     * @return 0 when the report was written, 2 on an abort (message already on {@code err})
      */
-    private void runDefineConformance(Args args, Path outputBase, PrintStream err)
-        throws IOException
+    private int runDefineConformance(Args args, Path outputBase, PrintStream err) throws IOException
     {
         Path defineXml = Path
                 .of(java.util.Objects.requireNonNull(args.defineXmlPath, "defineXmlPath"))
                 .toAbsolutePath();
         DefineConformanceInput.Builder builder = DefineConformanceInput.builder(defineXml)
                 .useDefaultSubmissionFolder(true);
-        @Nullable
-        CdiscLibraryBackedLibraryProvider libraryProvider;
         Path submissionFolder = resolveDefineSubmissionFolder(args);
         if (submissionFolder != null)
         {
@@ -1951,15 +1903,6 @@ public final class CdiscValidate
         if (versionOverride != null)
         {
             builder.versionOverride(versionOverride);
-        }
-        // ⚠ null, not args.cache: since cache 8b-1 -ca names the unified metadata STORE (a zip),
-        // not an HTTP response cache directory. The define-conformance library provider still
-        // uses the CDISC Library API and resolves its own cache via CDISC_API_CACHE /
-        // cdisc.library.api.cache / ~/.cdiscApiCache.
-        libraryProvider = library.provider(null);
-        if (libraryProvider != null)
-        {
-            builder.libraryProvider(libraryProvider);
         }
 
         // Selection intent, not a corpus: the engine resolves the packages itself, because the
@@ -1985,83 +1928,106 @@ public final class CdiscValidate
                     + (Files.isDirectory(defineXml) ? " (that is a directory)" : ""));
         }
 
-        DefineConformanceInput input = builder.build();
-        DefineConformanceReport report;
+        // The store the dataset run reads too (-ca outranks the ambient configuration).
+        Path storeFile = StoreMetadataProviderFactory.resolveConfiguredFile(args.cache);
+        DefineStoreBinding binding;
         try
         {
-            report = new DefineConformanceEngine().validate(input);
+            binding = DefineStoreBinding.resolve(defineXml, args.controlledTerminologyPackages,
+                    storeFile);
         }
-        catch (DefineRuleSelectionException e)
+        catch (StudyValidationException e)
         {
-            // Selection and corpus problems are the caller's to fix, so they surface as usage
-            // errors. An evaluation-time fault is NOT, and must propagate: reporting "invalid
-            // rules configuration" for a CustomCheck whose constructor throws sends the operator
-            // to inspect their own setup for an engine bug. The distinction is carried by the
-            // exception TYPE — it was briefly carried by substring-matching the message, which
-            // would have silently reclassified errors the first time one was reworded.
-            String message = e.getMessage();
-            throw new UsageException(
-                    message != null ? message : "invalid Define-XML rule selection", e);
+            err.println("Error: " + withStoreRemedy(e));
+            return 2;
         }
+        try (binding)
+        {
+            builder.ctProvider(binding.ctProvider().orElse(null));
+            builder.libraryProvider(binding.libraryProvider().orElse(null));
 
-        Path target = outputBase.resolveSibling(fileName(outputBase) + ".define.json");
-        JsonReportWriter.write(report, target);
+            DefineConformanceInput input = builder.build();
+            DefineConformanceReport report;
+            try
+            {
+                report = new DefineConformanceEngine().validate(input);
+            }
+            catch (DefineRuleSelectionException e)
+            {
+                // Selection and corpus problems are the caller's to fix, so they surface as usage
+                // errors. An evaluation-time fault is NOT, and must propagate: reporting "invalid
+                // rules configuration" for a CustomCheck whose constructor throws sends the
+                // operator to inspect their own setup for an engine bug. The distinction is
+                // carried by the exception TYPE — it was briefly carried by substring-matching the
+                // message, which would have silently reclassified errors the first time one was
+                // reworded.
+                String message = e.getMessage();
+                throw new UsageException(
+                        message != null ? message : "invalid Define-XML rule selection", e);
+            }
 
-        // The Library counterpart of D13 surface 5 (the "Dictionary basis:" line): a Library
-        // outage makes every library-gated rule answer empty, which the SPI treats as "out of the
-        // rule's reach" — so a fully degraded run produces a report that looks exactly like one
-        // where those rules genuinely passed. The report record itself carries no degradation
-        // field (it is the engine's, in cumba-corej), so the CLI at least says so where a CLI user
-        // looks, instead of leaving it in a single JUL WARNING.
-        printLibraryBasis(libraryProvider, err);
+            Path target = outputBase.resolveSibling(fileName(outputBase) + ".define.json");
+            JsonReportWriter.write(report, target);
 
-        String byCategory = report.findingsByCategory().entrySet().stream()
-                .map(e -> e.getKey().name() + "="
-                        + e.getValue().values().stream().mapToLong(Long::longValue).sum())
-                .collect(Collectors.joining(", "));
-        LOGGER.log(System.Logger.Level.INFO,
-                "Define-XML conformance ({0}) complete: {1} findings [{2}]. Report: {3}",
-                report.defineVersion(), report.totalFindings(),
-                byCategory.isEmpty() ? "none" : byCategory, target);
+            // The store counterpart of D13 surface 5 (the "Dictionary basis:" line): what CT and
+            // which library this report was judged against — and, when nothing or less was bound,
+            // that the CT / library rules skipped or answered empty, so a report that looks like
+            // one where those rules genuinely passed is not mistaken for one. The report record
+            // itself carries no basis field (it is the engine's, in cumba-corej), so the CLI says
+            // it where a CLI user looks.
+            printStoreBasis(binding, err);
+
+            String byCategory = report.findingsByCategory().entrySet().stream()
+                    .map(e -> e.getKey().name() + "="
+                            + e.getValue().values().stream().mapToLong(Long::longValue).sum())
+                    .collect(Collectors.joining(", "));
+            LOGGER.log(System.Logger.Level.INFO,
+                    "Define-XML conformance ({0}) complete: {1} findings [{2}]. Report: {3}",
+                    report.defineVersion(), report.totalFindings(),
+                    byCategory.isEmpty() ? "none" : byCategory, target);
+        }
+        return 0;
     }
 
 
     /**
-     * D13 surface 5's Library counterpart: says on <b>stderr</b> that a CDISC Library outage
-     * silently narrowed this Define-XML report.
+     * The two basis lines of a Define-XML run, on <b>stderr</b>: the CT bound (or why none) and the
+     * library store (with any product it did not hold). Printed on every {@code -vx} run — a run
+     * with no store must say so where a CLI user looks, because every skip is otherwise visible
+     * only inside {@code report.define.json}.
      *
      * <p>
-     * The {@code LibraryProvider} SPI turns every failed lookup into an empty answer, which the
-     * engine reads as "out of the rule's reach" — so a fully degraded run produces a report that
-     * looks exactly like one where the library-gated rules genuinely passed. The report record
-     * carries no degradation field (it is the engine's, in {@code cumba-corej}), so the CLI says it
-     * where a CLI user looks instead of leaving it in a single JUL WARNING.
+     * Package-private and separate from {@link #runDefineConformance} so the wording is assertable
+     * without an end-to-end run; the call site is pinned by the {@code -vx} tests.
      * </p>
      *
-     * <p>
-     * Package-private and separate from {@link #runDefineConformance} for one reason: this is the
-     * user-facing surface of F-cli-06 and it must be assertable without a live Library outage.
-     * Inlined, both its guard and its {@code println} were unkillable (C2-04) — the line could be
-     * deleted outright and the suite stayed green.
-     * </p>
-     *
-     * @param aProvider
-     *            the run's Library provider, or {@code null} when no API key was configured and no
-     *            lookup was ever attempted
+     * @param aBinding
+     *            the run's binding, after the engine ran (the library half records its misses
+     *            during the run)
      * @param aErr
      *            the operator's stream
      */
-    static void printLibraryBasis(@Nullable CdiscLibraryBackedLibraryProvider aProvider,
-            PrintStream aErr)
+    static void printStoreBasis(DefineStoreBinding aBinding, PrintStream aErr)
     {
-        List<String> degraded = aProvider == null ? List.of() : aProvider.degradedLookups();
-        if (degraded.isEmpty())
+        aErr.println(aBinding.basis());
+        aErr.println(aBinding.libraryBasis());
+    }
+
+
+    /**
+     * The message of an operational abort, plus this surface's remedy when the cause is an
+     * old-format metadata store (PLAN-define-ct-evaluation T1-10 m1: the core's message is neutral,
+     * the surface that knows its remedy appends it).
+     */
+    static String withStoreRemedy(StudyValidationException aFailure)
+    {
+        String message = aFailure.getMessage();
+        if (aFailure.getCause() instanceof net.cumba.corej.core.metadata.store.StoreFormatException)
         {
-            return;
+            return message + " Re-seed it with --seed-cache (add --seed-overwrite to replace the"
+                    + " old store), or point -ca / CDISC_METADATA_STORE at a store of this format.";
         }
-        aErr.println("Library basis: " + degraded.size() + " CDISC Library lookup(s) failed ("
-                + String.join(", ", degraded) + "); the library-gated Define-XML rules could "
-                + "not fire for them, so this report under-reports.");
+        return message != null ? message : aFailure.getClass().getSimpleName();
     }
 
 
@@ -2306,7 +2272,15 @@ public final class CdiscValidate
                 "  -mr, --max-report-rows <n>       per-sheet row cap for xlsx (default 10000; 0 = unlimited)");
         out.println("  -vx, --validate-xml [y|n]        also run Define-XML conformance on -dxp,");
         out.println(
-                "                                   writing <output-base>.define.json (local mode)");
+                "                                   writing <output-base>.define.json (local mode).");
+        out.println(
+                "                                   CT and the IG library come from the metadata");
+        out.println(
+                "                                   store (-ca); -ct governs this run too. A named");
+        out.println(
+                "                                   CT package the store lacks ABORTS the whole");
+        out.println(
+                "                                   invocation: exit 2, no report of either kind");
         out.println(
                 "       --define-rules-dir <dir>    Define-XML rules directory for -vx (default:");
         out.println(
@@ -2332,7 +2306,9 @@ public final class CdiscValidate
         out.println("  --define-first                   prefer declared define.xml class/subclass "
                 + "over heuristics (the default)");
         out.println("  -ct, --controlled-terminology-package <pkg>");
-        out.println("                                   CT package id, repeatable");
+        out.println("                                   CT package id, repeatable; governs the");
+        out.println("                                   dataset run and -vx (an explicit list");
+        out.println("                                   replaces the define's declared CT)");
         out.println("  -dv, --define-version <ver>      Define-XML version");
         out.println(
                 "  -r,  --rules <CORE-id>           include only matching rule ids (repeatable)");
@@ -2453,6 +2429,8 @@ public final class CdiscValidate
         out.println();
         out.println("Authentication (CDISC Library, local mode):");
         out.println("  Set CDISC_API_KEY env var or -Dcdisc.library.api.key system property.");
+        out.println("  Needed for --seed-cache-from-api only: validation, -vx included, reads the");
+        out.println("  metadata store and never the live API.");
     }
 
     /** Parsed CLI arguments. */

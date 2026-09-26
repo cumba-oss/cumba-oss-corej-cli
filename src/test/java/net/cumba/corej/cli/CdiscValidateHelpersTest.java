@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -621,8 +622,8 @@ class CdiscValidateHelpersTest
             @org.junit.jupiter.api.io.TempDir Path tmp)
         throws Exception
     {
-        Path dataDir = java.nio.file.Files.createDirectory(tmp.resolve("data"));
-        Path dataFile = java.nio.file.Files.writeString(dataDir.resolve("dm.csv"), "USUBJID\n");
+        Path dataDir = Files.createDirectory(tmp.resolve("data"));
+        Path dataFile = Files.writeString(dataDir.resolve("dm.csv"), "USUBJID\n");
 
         assertNull(resolveDefineSubmissionFolder(null), "no -d: the engine default applies");
         assertNull(resolveDefineSubmissionFolder("https://host/study"), "a URI has no folder");
@@ -649,102 +650,92 @@ class CdiscValidateHelpersTest
     }
 
     // ------------------------------------------------------------------
-    // printLibraryBasis (F-cli-06 / C2-04)
+    // printStoreBasis / withStoreRemedy (PLAN-define-ct-evaluation P4)
     // ------------------------------------------------------------------
 
 
     /**
-     * A provider whose every lookup fails, built on the same package-private {@code ProductSource}
-     * seam {@code CdiscLibraryBackedLibraryProviderTest} uses — no network, no API key.
+     * A define whose only declaration is one CT package, and a store that holds it — the smallest
+     * bound binding; and the same define against no store — the smallest unbound one.
      */
-    private static CdiscLibraryBackedLibraryProvider degradedProvider()
+    private static net.cumba.corej.core.run.DefineStoreBinding binding(boolean aWithStore)
+        throws java.io.IOException
     {
-        CdiscLibraryBackedLibraryProvider provider = new CdiscLibraryBackedLibraryProvider(
-                new CdiscLibraryBackedLibraryProvider.ProductSource()
-                {
-
-                    @Override
-                    public net.cumba.cdisc.library.api.model.sdtm.@org.jspecify.annotations.Nullable SdtmProduct fetch(
-                            String aProductId, String aVersion)
-                        throws java.io.IOException
-                    {
-                        throw new java.io.IOException("offline");
-                    }
-
-
-                    @Override
-                    public net.cumba.cdisc.library.api.model.products.@org.jspecify.annotations.Nullable Products catalog()
-                        throws java.io.IOException
-                    {
-                        throw new java.io.IOException("offline");
-                    }
-                });
-        provider.datasetLabel("SDTMIG", "3.4", "DM");
-        provider.datasetLabel("SENDIG", "3.1", "DM");
-        return provider;
+        Path dir = Files.createTempDirectory("store-basis");
+        Path define = Files.writeString(dir.resolve("define.xml"), """
+                <ODM xmlns="http://www.cdisc.org/ns/odm/v1.3"
+                     xmlns:def="http://www.cdisc.org/ns/def/v2.1" FileOID="x" FileType="Snapshot"
+                     ODMVersion="1.3.2" CreationDateTime="2026-01-01T00:00:00">
+                  <Study OID="ST"><GlobalVariables><StudyName>S</StudyName>
+                    <StudyDescription>d</StudyDescription><ProtocolName>p</ProtocolName>
+                    </GlobalVariables>
+                    <MetaDataVersion OID="MDV" Name="m" def:DefineVersion="2.1.0">
+                      <def:Standards>
+                        <def:Standard OID="STD.CT" Name="CDISC/NCI" Type="CT" PublishingSet="SDTM"
+                                      Version="2024-03-29" Status="Final"/>
+                      </def:Standards>
+                    </MetaDataVersion></Study></ODM>
+                """);
+        Path store = dir.resolve("store.zip");
+        new net.cumba.corej.core.metadata.store.MetadataStoreWriter()
+                .addCtPackage(new net.cumba.corej.core.metadata.store.StoredCtPackage(
+                        "sdtmct-2024-03-29", List.of()))
+                .publishedCtPackages(List.of("sdtmct-2024-03-29")).productCatalogue(List.of())
+                .write(store);
+        return net.cumba.corej.core.run.DefineStoreBinding.resolve(define, List.of(),
+                aWithStore ? store : null);
     }
 
 
-    private static String printLibraryBasis(CdiscLibraryBackedLibraryProvider aProvider)
+    private static String printStoreBasis(net.cumba.corej.core.run.DefineStoreBinding aBinding)
     {
         java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
         try (java.io.PrintStream err = new java.io.PrintStream(buffer, true,
                 java.nio.charset.StandardCharsets.UTF_8))
         {
-            CdiscValidate.printLibraryBasis(aProvider, err);
+            CdiscValidate.printStoreBasis(aBinding, err);
         }
         return buffer.toString(java.nio.charset.StandardCharsets.UTF_8);
     }
 
 
-    /**
-     * C2-04. F-cli-06's CLI half shipped with no test at all: the guard survived and the
-     * {@code println} was NO_COVERAGE, so the line a clinical user relies on to learn that their
-     * Define-XML report under-reports could have been deleted outright with the suite still green.
-     * This pins the wording, the count and the named keys.
-     */
+    /** Both lines, always — a run with no store must say so where a CLI user looks. */
     @Test
-    void printLibraryBasis_namesEveryFailedLookupAndSaysTheReportUnderReports()
+    void printStoreBasis_printsTheCtAndTheLibraryLine_boundOrNot() throws java.io.IOException
     {
-        String err = printLibraryBasis(degradedProvider());
-
-        assertTrue(err.startsWith("Library basis: 2 CDISC Library lookup(s) failed ("), err);
-        assertTrue(err.contains("sdtmig|3-4"), err);
-        assertTrue(err.contains("sendig|3-1"), err);
-        assertTrue(err.contains("the library-gated Define-XML rules could not fire for them, so "
-                + "this report under-reports."), err);
-        assertEquals(1, err.lines().count(), err);
+        try (net.cumba.corej.core.run.DefineStoreBinding bound = binding(true))
+        {
+            String err = printStoreBasis(bound);
+            assertEquals(2, err.lines().count(), err);
+            assertTrue(err.startsWith("CT basis: sdtmct-2024-03-29 ("), err);
+            assertTrue(err.contains("\nLibrary basis: store "), err);
+        }
+        try (net.cumba.corej.core.run.DefineStoreBinding unbound = binding(false))
+        {
+            String err = printStoreBasis(unbound);
+            assertEquals(2, err.lines().count(), err);
+            assertTrue(err.startsWith("CT basis: none - no metadata store is configured"), err);
+            assertTrue(err.contains("SKIPPED_MISSING_CT"), err);
+            assertTrue(err.contains("Library basis: none - no metadata store is configured"), err);
+            assertTrue(err.contains("SKIPPED_MISSING_LIBRARY"), err);
+        }
     }
 
 
-    /** The other half of the guard: a run that lost nothing must not claim it did. */
+    /** T1-10 (m1): the core's message is neutral; this surface appends --seed-cache. */
     @Test
-    void printLibraryBasis_saysNothingWhenNoLookupFailed()
+    void withStoreRemedy_appendsTheSeedCacheRemedyOnlyForAnOldFormatStore()
     {
-        assertEquals("", printLibraryBasis(null),
-                "no API key was configured, so no lookup was ever attempted");
+        net.cumba.corej.core.metadata.store.StoreFormatException cause = new net.cumba.corej.core.metadata.store.StoreFormatException(
+                Path.of("old.zip"), 2, 3);
+        String withRemedy = CdiscValidate.withStoreRemedy(
+                new net.cumba.corej.core.run.StudyValidationException(cause.describe(), cause));
+        assertTrue(withRemedy.startsWith(cause.describe()), withRemedy);
+        assertTrue(withRemedy.contains("--seed-cache"), withRemedy);
 
-        CdiscLibraryBackedLibraryProvider healthy = new CdiscLibraryBackedLibraryProvider(
-                new CdiscLibraryBackedLibraryProvider.ProductSource()
-                {
-
-                    @Override
-                    public net.cumba.cdisc.library.api.model.sdtm.@org.jspecify.annotations.Nullable SdtmProduct fetch(
-                            String aProductId, String aVersion)
-                    {
-                        return null;
-                    }
-
-
-                    @Override
-                    public net.cumba.cdisc.library.api.model.products.@org.jspecify.annotations.Nullable Products catalog()
-                    {
-                        return null;
-                    }
-                });
-        healthy.datasetLabel("SDTMIG", "3.4", "DM");
-        assertEquals("", printLibraryBasis(healthy),
-                "an answered-but-empty lookup is not a degradation");
+        String plain = CdiscValidate.withStoreRemedy(
+                new net.cumba.corej.core.run.StudyValidationException("no rules selected"));
+        assertEquals("no rules selected", plain, "no remedy for an unrelated operational failure");
     }
 
 
@@ -839,12 +830,10 @@ class CdiscValidateHelpersTest
      * <p>
      * ⚠ Renamed from {@code run_threeArgOverload_delegatesToTheProductionSeams}, which is not what
      * it pins: {@code -h} returns from the six-argument overload before {@code downloads},
-     * {@code library} or {@code archives} is ever read, so substituting a test double for any of
-     * the three at the delegation site leaves this test green. The production seams are asserted
-     * where they can actually be observed —
-     * {@link #httpArchives_buildsAnHttpSourceOverTheGivenRepo} and
-     * {@link #configuredLibrary_withoutAnApiKey_yieldsNoProvider} pin the factories themselves, and
-     * no offline test can distinguish which instance the delegation passed.
+     * {@code library} or {@code archives} is ever read, so substituting a test double for either at
+     * the delegation site leaves this test green. The production seams are asserted where they can
+     * actually be observed — {@link #httpArchives_buildsAnHttpSourceOverTheGivenRepo} pins the
+     * factory itself, and no offline test can distinguish which instance the delegation passed.
      * </p>
      */
     @Test
@@ -862,20 +851,5 @@ class CdiscValidateHelpersTest
                 out.toString(java.nio.charset.StandardCharsets.UTF_8)
                         .contains("Usage: CdiscValidate [options]"),
                 "the usage banner is written to the out stream");
-    }
-
-
-    /**
-     * With no API key configured the production {@link CdiscValidate.LibraryAccess} yields none.
-     */
-    @Test
-    void configuredLibrary_withoutAnApiKey_yieldsNoProvider()
-    {
-        String apiKey = net.cumba.cdisc.library.api.client.CdiscLibraryClient.getApiKey();
-        org.junit.jupiter.api.Assumptions.assumeTrue(apiKey == null || apiKey.isBlank(),
-                "this machine has a CDISC Library API key configured, so the no-key branch "
-                        + "cannot be exercised here");
-        assertNull(CdiscValidate.configuredLibrary().provider(null),
-                "no API key means no provider and no lookup");
     }
 }

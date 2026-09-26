@@ -218,8 +218,7 @@ class CdiscValidateInstallDictionariesTest
         try (PrintStream o = new PrintStream(out, true, StandardCharsets.UTF_8);
                 PrintStream e = new PrintStream(err, true, StandardCharsets.UTF_8))
         {
-            code = CdiscValidate.run(aArgs, o, e, aDownloads, CdiscValidate.configuredLibrary(),
-                    OfflineCli.NO_ARCHIVE);
+            code = CdiscValidate.run(aArgs, o, e, aDownloads, OfflineCli.NO_ARCHIVE);
         }
         return new Run(code, out.toString(StandardCharsets.UTF_8),
                 err.toString(StandardCharsets.UTF_8));

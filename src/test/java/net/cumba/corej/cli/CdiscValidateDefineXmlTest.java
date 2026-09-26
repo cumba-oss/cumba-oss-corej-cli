@@ -15,9 +15,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import net.cumba.cdisc.library.api.model.products.Products;
-import net.cumba.cdisc.library.api.model.sdtm.SdtmProduct;
-import org.jspecify.annotations.Nullable;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -157,78 +155,382 @@ class CdiscValidateDefineXmlTest
                 "bare -vx enables the conformance report");
     }
 
+    // ------------------------------------------------------------------
+    // N4 (PLAN-define-ct-evaluation): the store-backed CT and library binding of -vx
+    // ------------------------------------------------------------------
 
     /**
-     * C3-02: pins the <b>call site</b>, not the method. {@code printLibraryBasis} itself is covered
-     * by {@code CdiscValidateHelpersTest}, but every other end-to-end case here runs with no API
-     * key, so the provider is {@code null}, the method returns at its first {@code if}, and
-     * {@code removed call to printLibraryBasis} in {@code runDefineConformance} is
-     * <b>equivalent</b> — the recorded kill of {@code CdiscValidate:1651} was false. This case
-     * injects a provider that has already recorded a failed lookup, so deleting the call from
-     * {@code runDefineConformance} makes exactly this assertion fail.
-     *
-     * <p>
-     * The lookup is provoked here rather than left to the engine on purpose: whether a rule asks
-     * the Library depends on the corpus, and this test is about the CLI reporting degradation it
-     * was handed, not about which rules ask.
-     * </p>
+     * The five CT rules naming an explicit Define-XML CT c-code (D-3): they execute only when a
+     * {@code define-xmlct} package is bound, and SKIP — visibly — when only SDTM CT is (T1-4 a).
+     */
+    private static final List<String> DEFINE_XML_CT_RULES = List.of("DEFINE-XML-0132",
+            "PMDA-DD0021-B", "PMDA-DD0055-C", "PMDA-DD0099", "PMDA-DD0100");
+
+    /**
+     * The 7 CDISC 2.1 and 17 PMDA 2.1 rules declaring {@code Requires: ct} in the shipped corpus.
+     */
+    private static final List<String> CT_RULES_21 = List.of("DEFINE-XML-0132", "DEFINE-XML-0179",
+            "DEFINE-XML-0186", "DEFINE-XML-0187", "DEFINE-XML-0192", "DEFINE-XML-0201",
+            "DEFINE-XML-0202", "PMDA-DD0021-B", "PMDA-DD0024", "PMDA-DD0024-B", "PMDA-DD0028",
+            "PMDA-DD0028-B", "PMDA-DD0029", "PMDA-DD0029-B", "PMDA-DD0032", "PMDA-DD0032-B",
+            "PMDA-DD0033", "PMDA-DD0034", "PMDA-DD0034-B", "PMDA-DD0055-C", "PMDA-DD0099",
+            "PMDA-DD0100", "PMDA-DD0132", "PMDA-DD0132-B");
+
+    /** The 8 CDISC 2.1 and 5 PMDA 2.1 rules declaring {@code Requires: library}. */
+    private static final List<String> LIBRARY_RULES_21 = List.of("DEFINE-XML-0067",
+            "DEFINE-XML-0097", "DEFINE-XML-0098", "DEFINE-XML-0099", "DEFINE-XML-0149",
+            "DEFINE-XML-0263", "DEFINE-XML-0265", "DEFINE-XML-0266", "PMDA-DD0116", "PMDA-DD0118",
+            "PMDA-DD0124", "PMDA-DD0136", "PMDA-DD0137");
+
+    /** A 2.1 define declaring SDTMIG 3.4 + SDTM CT, with a mislabelled DM (0265 / DD0136). */
+    private static final String LIBRARY_DEFINE = """
+            <ODM xmlns="http://www.cdisc.org/ns/odm/v1.3"
+                 xmlns:def="http://www.cdisc.org/ns/def/v2.1" FileOID="x" FileType="Snapshot"
+                 ODMVersion="1.3.2" CreationDateTime="2026-01-01T00:00:00">
+              <Study OID="ST">
+                <GlobalVariables><StudyName>S</StudyName><StudyDescription>d</StudyDescription>
+                  <ProtocolName>p</ProtocolName></GlobalVariables>
+                <MetaDataVersion OID="MDV" Name="m" def:DefineVersion="2.1.0">
+                  <def:Standards>
+                    <def:Standard OID="STD.IG" Name="SDTMIG" Type="IG" Version="3.4" Status="Final"/>
+                    <def:Standard OID="STD.CT" Name="CDISC/NCI" Type="CT" PublishingSet="SDTM"
+                                  Version="2024-03-29" Status="Final"/>
+                  </def:Standards>
+                  <ItemGroupDef OID="IG.DM" Name="DM" Domain="DM" Repeating="No" Purpose="Tabulation"
+                                def:StandardOID="STD.IG" def:Structure="One record per subject"
+                                SASDatasetName="DM">
+                    <Description><TranslatedText xml:lang="en">Demographic Data</TranslatedText></Description>
+                    <ItemRef ItemOID="IT.USUBJID" Mandatory="Yes"/>
+                  </ItemGroupDef>
+                  <ItemDef OID="IT.USUBJID" Name="USUBJID" DataType="text" Length="20">
+                    <Description><TranslatedText xml:lang="en">Unique Subject Identifier</TranslatedText></Description>
+                  </ItemDef>
+                </MetaDataVersion>
+              </Study>
+            </ODM>
+            """;
+
+    /** A 2.1 define whose only CT declaration names a package no store holds (T1-13 case 4). */
+    private static final String DECLARES_MISSING_CT = """
+            <ODM xmlns="http://www.cdisc.org/ns/odm/v1.3"
+                 xmlns:def="http://www.cdisc.org/ns/def/v2.1" FileOID="x" FileType="Snapshot"
+                 ODMVersion="1.3.2" CreationDateTime="2026-01-01T00:00:00">
+              <Study OID="ST">
+                <GlobalVariables><StudyName>S</StudyName><StudyDescription>d</StudyDescription>
+                  <ProtocolName>p</ProtocolName></GlobalVariables>
+                <MetaDataVersion OID="MDV" Name="m" def:DefineVersion="2.1.0">
+                  <def:Standards>
+                    <def:Standard OID="STD.CT" Name="CDISC/NCI" Type="CT" PublishingSet="SDTM"
+                                  Version="1999-01-01" Status="Final"/>
+                  </def:Standards>
+                </MetaDataVersion>
+              </Study>
+            </ODM>
+            """;
+
+    /**
+     * The packaged Define-XML corpus the CLI bundles, staged by {@code download-corej-rules-define}
+     * at generate-resources — the REAL rules, so the rosters below are the shipped ones. Asserted,
+     * never assumed: a missing corpus fails this suite instead of silently removing it.
+     */
+    private static String bundledDefineRules() throws IOException
+    {
+        Path staged = Path.of(System.getProperty("projectBasedir", "."), "target",
+                "corej-rules-define");
+        assertTrue(Files.isDirectory(staged),
+                "the bundled Define-XML corpus is staged at " + staged);
+        try (java.util.stream.Stream<Path> dirs = Files.list(staged))
+        {
+            Path rules = dirs.map(d -> d.resolve("rules-define")).filter(Files::isDirectory)
+                    .findFirst().orElseThrow(
+                            () -> new AssertionError("no <version>/rules-define under " + staged));
+            assertTrue(Files.isRegularFile(rules.resolve("packages.json")), rules.toString());
+            return rules.toString();
+        }
+    }
+
+
+    private static net.cumba.corej.core.metadata.store.StoredCodelist codelist(String aName,
+            String aSubmissionValue, String aCCode, boolean aExtensible,
+            java.util.Map<String, String> aTerms)
+    {
+        List<net.cumba.corej.core.metadata.store.StoredTerm> terms = new java.util.ArrayList<>();
+        aTerms.forEach(
+                (value, code) -> terms.add(new net.cumba.corej.core.metadata.store.StoredTerm(value,
+                        code, value, null, null)));
+        return new net.cumba.corej.core.metadata.store.StoredCodelist(aSubmissionValue, aCCode,
+                aName, aName, null, null, aExtensible, terms);
+    }
+
+
+    /**
+     * A store holding the corpus tests' stub CT as real packages — SEX, UNIT (sdtmct-2024-03-29),
+     * STDNAM, GNRLOBSC (define-xmlct-2024-03-29) — plus a small SDTMIG 3.4 product (DM
+     * "Demographics", USUBJID Req) with its SDTM 2.0 model. Written by the production writer, so it
+     * is a genuine current-format store.
+     */
+    private static Path store(Path aDir) throws IOException
+    {
+        net.cumba.corej.core.metadata.store.StoredCtPackage sdtm = new net.cumba.corej.core.metadata.store.StoredCtPackage(
+                "sdtmct-2024-03-29",
+                List.of(codelist("Sex", "SEX", "C66731", false,
+                        java.util.Map.of("F", "C16576", "M", "C20197", "U", "C17998")),
+                        codelist("Unit", "UNIT", "C71620", true,
+                                java.util.Map.of("mg", "C28253", "mL", "C28254"))));
+        net.cumba.corej.core.metadata.store.StoredCtPackage define = new net.cumba.corej.core.metadata.store.StoredCtPackage(
+                "define-xmlct-2024-03-29", List.of(
+                        codelist("Standard Name", "STDNAM", "C170452", true,
+                                java.util.Map.of("SDTMIG", "C170455", "SENDIG", "C170456", "ADaMIG",
+                                        "C170552", "CDISC/NCI", "C163415")),
+                        codelist("General Observation Class", "GNRLOBSC", "C103329", false,
+                                java.util.Map.of("EVENTS", "C103372", "FINDINGS", "C103373",
+                                        "INTERVENTIONS", "C103374", "SPECIAL PURPOSE", "C103377")),
+                        codelist("Analysis Reason", "ANLREAS", "C117744", true,
+                                java.util.Map.of("SPECIFIED IN PROTOCOL", "C117749",
+                                        "SPECIFIED IN SAP", "C117750", "DATA DRIVEN", "C117746")),
+                        codelist("Analysis Purpose", "ANLPURP", "C117745", true,
+                                java.util.Map.of("PRIMARY OUTCOME MEASURE", "C117752",
+                                        "SECONDARY OUTCOME MEASURE", "C117753"))));
+        net.cumba.corej.core.metadata.store.StoredVariable usubjid = net.cumba.corej.core.metadata.store.StoredVariable
+                .builder().name("USUBJID").label("Unique Subject Identifier").core("Req").build();
+        net.cumba.corej.core.metadata.store.StoredProduct ig = net.cumba.corej.core.metadata.store.StoredProduct
+                .builder().key("standards/sdtmig/3-4").name("SDTMIG").version("3-4")
+                .modelHref("/mdr/sdtm/2-0")
+                .classes(List.of(new net.cumba.corej.core.metadata.store.StoredClass(
+                        "Special-Purpose", null, "1", List.of(),
+                        List.of(new net.cumba.corej.core.metadata.store.StoredDataset("DM",
+                                "Demographics", "1", "One record per subject", List.of(usubjid),
+                                null, null)),
+                        null, List.of(), List.of(), List.of())))
+                .build();
+        net.cumba.corej.core.metadata.store.StoredProduct model = net.cumba.corej.core.metadata.store.StoredProduct
+                .builder().key("models/sdtm/2-0").name("SDTM").version("2-0").build();
+        Path store = aDir.resolve("store.zip");
+        new net.cumba.corej.core.metadata.store.MetadataStoreWriter().addCtPackage(sdtm)
+                .addCtPackage(define).addProduct(ig).addProduct(model)
+                .publishedCtPackages(List.of("sdtmct-2024-03-29", "define-xmlct-2024-03-29"))
+                .productCatalogue(List.of("standards/sdtmig/3-4")).write(store);
+        return store;
+    }
+
+
+    private static java.util.Map<String, JsonNode> executionsById(Path aDefineJson)
+        throws IOException
+    {
+        JsonNode root = MAPPER.readTree(Files.readString(aDefineJson, StandardCharsets.UTF_8));
+        java.util.Map<String, JsonNode> byId = new java.util.HashMap<>();
+        for (JsonNode execution : root.path("ruleExecutions"))
+        {
+            byId.put(execution.path("ruleId").asText(), execution);
+        }
+        assertFalse(byId.isEmpty(), "ruleExecutions present in " + aDefineJson);
+        return byId;
+    }
+
+
+    private static void assertAllExecuted(java.util.Map<String, JsonNode> aExecutions,
+            List<String> aRoster, String aWhat)
+    {
+        List<String> notExecuted = new java.util.ArrayList<>();
+        for (String id : aRoster)
+        {
+            JsonNode execution = aExecutions.get(id);
+            if (execution == null || !"EXECUTED".equals(execution.path("status").asText()))
+            {
+                notExecuted.add(id + "="
+                        + (execution == null ? "absent" : execution.path("status").asText()));
+            }
+        }
+        assertEquals(List.of(), notExecuted, aWhat + " must all be EXECUTED");
+    }
+
+
+    /** N4 case 1: with a store and {@code -ct}, every CT rule executes and DD0024 fires once. */
+    @Test
+    void validateXml_withAStoreAndCt_executesEveryCtRule() throws Exception
+    {
+        Path emptyData = Files.createDirectory(tempDir.resolve("data-ct"));
+        Path store = store(tempDir);
+        Captured cap = new Captured();
+        runTolerant(new String[]
+        {
+                "-vx", "-d", emptyData.toString(), "-dxp", ctFixture().toString(), "-o",
+                tempDir.resolve("ct.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                store.toString(), "-ct", "sdtmct-2024-03-29", "-ct", "define-xmlct-2024-03-29"
+        }, cap);
+
+        java.util.Map<String, JsonNode> executions = executionsById(
+                tempDir.resolve("ct.define.json"));
+        assertAllExecuted(executions, CT_RULES_21, "the 24 CT rules of CDISC + PMDA 2.1");
+        assertEquals(1, executions.get("PMDA-DD0024").path("findingCount").asInt(),
+                "DD0024 fires on the fixture's non-member of the non-extensible SEX codelist");
+        String err = cap.errAsString();
+        assertTrue(err.contains("CT basis: define-xmlct-2024-03-29, sdtmct-2024-03-29 ("),
+                "the CT basis line, Define-XML CT first (D-2): " + err);
+        assertTrue(err.contains("Library basis: store " + store), err);
+    }
+
+
+    /**
+     * N4 case 1, library half: with NO API key, the library rules execute from the store and
+     * DEFINE-XML-0265 fires on the mislabelled dataset.
      */
     @Test
-    void validateXml_degradedLibrary_saysSoOnStderr() throws Exception
+    void validateXml_withAStore_executesEveryLibraryRuleWithoutAnApiKey() throws Exception
     {
-        CdiscLibraryBackedLibraryProvider provider = new CdiscLibraryBackedLibraryProvider(
-                new CdiscLibraryBackedLibraryProvider.ProductSource()
-                {
-
-                    @Override
-                    public @Nullable SdtmProduct fetch(String aProductId, String aVersion)
-                        throws IOException
-                    {
-                        throw new IOException("offline");
-                    }
-
-
-                    @Override
-                    public @Nullable Products catalog() throws IOException
-                    {
-                        throw new IOException("offline");
-                    }
-                });
-        assertTrue(provider.datasetLabel("SDTMIG", "3.4", "DM").isEmpty(),
-                "a failing ProductSource answers empty");
-        assertEquals(java.util.List.of("sdtmig|3-4"), provider.degradedLookups(),
-                "the provider handed to the CLI has one recorded failure");
-
-        Path emptyData = Files.createDirectory(tempDir.resolve("data-degraded"));
+        assertTrue(
+                System.getenv("CDISC_API_KEY") == null
+                        && System.getProperty("cdisc.library.api.key") == null,
+                "this case proves the store path needs no API key; unset it to run the suite");
+        Path emptyData = Files.createDirectory(tempDir.resolve("data-lib"));
+        Path define = Files.writeString(tempDir.resolve("define.xml"), LIBRARY_DEFINE,
+                StandardCharsets.UTF_8);
+        Path store = store(tempDir);
         Captured cap = new Captured();
-        try
+        runTolerant(new String[]
         {
-            OfflineCli.run(new String[]
-            {
-                    "-vx", "-d", emptyData.toString(), "-dxp", fixture().toString(), "-o",
-                    tempDir.resolve("degraded.json").toString(), "--rules-dir", tempDir.toString(),
-                    "--define-rules-dir", defineRules(tempDir), "--define-family", "CDISC"
-            }, cap.out, cap.err, aCacheDir -> provider);
-        }
-        catch (IOException | RuntimeException ignored)
-        {
-            // Data-lane variance is out of scope; the conformance report is already written.
-        }
+                "-vx", "-d", emptyData.toString(), "-dxp", define.toString(), "-o",
+                tempDir.resolve("lib.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                store.toString()
+        }, cap);
 
-        assertTrue(Files.exists(tempDir.resolve("degraded.define.json")),
-                "the conformance report is written");
+        java.util.Map<String, JsonNode> executions = executionsById(
+                tempDir.resolve("lib.define.json"));
+        assertAllExecuted(executions, LIBRARY_RULES_21, "the 13 library rules of CDISC + PMDA 2.1");
+        assertEquals(1, executions.get("DEFINE-XML-0265").path("findingCount").asInt(),
+                "0265 fires on DM 'Demographic Data' vs the IG's 'Demographics'");
+        assertEquals(1, executions.get("PMDA-DD0136").path("findingCount").asInt());
+        // A blank -ct takes the declaration (D1): SDTM CT is bound, so the CT rules execute -
+        // except the five naming a Define-XML CT c-code, which nothing named (T1-4 a): the D-3
+        // gate keeps them visibly SKIPPED instead of executing them against a CT that cannot
+        // answer.
+        List<String> sdtmCtRules = new java.util.ArrayList<>(CT_RULES_21);
+        sdtmCtRules.removeAll(DEFINE_XML_CT_RULES);
+        assertAllExecuted(executions, sdtmCtRules,
+                "the declared SDTM CT is bound too (a blank -ct takes the declaration, D1)");
+        for (String id : DEFINE_XML_CT_RULES)
+        {
+            assertEquals("SKIPPED_MISSING_CT", executions.get(id).path("status").asText(),
+                    id + " names a Define-XML CT c-code the bound SDTM CT cannot serve (D-3)");
+        }
+        assertTrue(cap.errAsString().contains("CT basis: sdtmct-2024-03-29 ("), cap.errAsString());
+    }
+
+
+    /** N4 case 2: no store — every CT and library rule SKIPs, and stderr says why. */
+    @Test
+    void validateXml_withoutAStore_skipsCtAndLibraryRulesAndSaysSo() throws Exception
+    {
+        Path emptyData = Files.createDirectory(tempDir.resolve("data-nostore"));
+        Captured cap = new Captured();
+        runTolerant(new String[]
+        {
+                "-vx", "-d", emptyData.toString(), "-dxp", ctFixture().toString(), "-o",
+                tempDir.resolve("nostore.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                tempDir.resolve("no-such-store.zip").toString()
+        }, cap);
+
+        java.util.Map<String, JsonNode> executions = executionsById(
+                tempDir.resolve("nostore.define.json"));
+        for (String id : CT_RULES_21)
+        {
+            assertEquals("SKIPPED_MISSING_CT", executions.get(id).path("status").asText(), id);
+        }
+        for (String id : LIBRARY_RULES_21)
+        {
+            assertEquals("SKIPPED_MISSING_LIBRARY", executions.get(id).path("status").asText(), id);
+        }
         String err = cap.errAsString();
-        // ⚠ The COUNT is deliberately not asserted here. This case hands the live run a provider
-        // it has already poked once, and whether a define rule asks the Library a second time
-        // depends on the corpus — so pinning "1 … failed" would red for a corpus change that has
-        // nothing to do with the call site under test. The exact count wording is pinned, against
-        // a provider nobody else touches, by
-        // printLibraryBasis_namesEveryFailedLookupAndSaysTheReportUnderReports.
-        assertTrue(err.contains("Library basis:"),
-                "runDefineConformance must report the degraded Library on stderr: " + err);
-        assertTrue(err.contains("sdtmig|3-4"), "the failed lookup is named: " + err);
-        assertTrue(err.contains("under-reports"),
-                "the consequence is stated, not just the count: " + err);
+        assertTrue(err.contains("CT basis: none - no metadata store is configured"), err);
+        assertTrue(err.contains("Library basis: none - no metadata store is configured"), err);
+    }
+
+
+    /**
+     * N4 case 3 (T1-2 a + T1-13 a): a {@code -ct} package the store lacks aborts the WHOLE
+     * invocation — exit 2, no define report, no dataset run (no runtime csv, no report).
+     */
+    @Test
+    void validateXml_ctPackageTheStoreLacks_abortsEverythingWithExit2() throws Exception
+    {
+        Path emptyData = Files.createDirectory(tempDir.resolve("data-abort"));
+        Path store = store(tempDir);
+        Captured cap = new Captured();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-vx", "-d", emptyData.toString(), "-dxp", ctFixture().toString(), "-o",
+                tempDir.resolve("abort.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                store.toString(), "-ct", "sdtmct-1999-01-01"
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertFalse(Files.exists(tempDir.resolve("abort.define.json")),
+                "no define report is written on an abort");
+        assertNoDatasetRun("abort");
+        String err = cap.errAsString();
+        assertTrue(err.contains("Error: "), err);
+        assertTrue(err.contains("sdtmct-1999-01-01"), err);
+        assertTrue(err.contains(store.toString()), err);
+    }
+
+
+    /**
+     * N4 case 4 (T1-13 a, the discriminator): the DEFINE declares a package the store lacks and
+     * {@code -ct} is blank, so the dataset run alone would have been unaffected — still exit 2,
+     * still no report of either kind.
+     */
+    @Test
+    void validateXml_defineDeclaresAPackageTheStoreLacks_abortsEverythingWithExit2()
+        throws Exception
+    {
+        Path emptyData = Files.createDirectory(tempDir.resolve("data-abort2"));
+        Path define = Files.writeString(tempDir.resolve("declares-missing.xml"),
+                DECLARES_MISSING_CT, StandardCharsets.UTF_8);
+        Path store = store(tempDir);
+        Captured cap = new Captured();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-vx", "-d", emptyData.toString(), "-dxp", define.toString(), "-o",
+                tempDir.resolve("abort2.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                store.toString()
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertFalse(Files.exists(tempDir.resolve("abort2.define.json")));
+        assertNoDatasetRun("abort2");
+        String err = cap.errAsString();
+        assertTrue(err.contains("declares controlled-terminology package 'sdtmct-1999-01-01'"),
+                err);
+        assertTrue(err.contains("fill the CT Packages field"), "the escape hatch is named: " + err);
+    }
+
+
+    /**
+     * The dataset run writes its runtime csv before validating; its absence proves it never ran.
+     */
+    private void assertNoDatasetRun(String aStem) throws IOException
+    {
+        try (java.util.stream.Stream<Path> files = Files.list(tempDir))
+        {
+            List<String> written = files.map(f -> f.getFileName().toString())
+                    .filter(n -> n.startsWith(aStem + ".") || n.startsWith(aStem + "-")).sorted()
+                    .toList();
+            assertEquals(List.of(), written, "the dataset run must not have started");
+        }
+    }
+
+
+    private static Path ctFixture() throws Exception
+    {
+        URL url = CdiscValidateDefineXmlTest.class.getResource("/define/ct-violations-21.xml");
+        assertNotNull(url,
+                "ct-violations-21.xml (from cumba-corej-rules) must be on the classpath");
+        return Path.of(url.toURI());
     }
 
 

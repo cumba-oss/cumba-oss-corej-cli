@@ -217,7 +217,10 @@ class CdiscValidateUsageTest
         // (+2 lines) and a two-line --seed-overwrite wording for refresh semantics (+1).
         // 141 since PLAN-report-conformance-fields review round 2 L3: -me states that its default
         // chain is local and that --remote without -me takes the server's configured default.
-        assertEquals(141, lineCount, "help banner line count changed: " + lineCount);
+        // 149 since PLAN-define-ct-evaluation P4: -vx says where its CT and library come from and
+        // that a named CT package the store lacks aborts (+4), -ct says it governs -vx too (+2),
+        // and the Authentication block says the key is for --seed-cache-from-api only (+2).
+        assertEquals(149, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();
