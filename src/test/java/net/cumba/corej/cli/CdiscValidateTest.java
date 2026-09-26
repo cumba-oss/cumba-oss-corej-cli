@@ -16,7 +16,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -396,36 +395,14 @@ class CdiscValidateTest
         Path report = tempDir.resolve("ar.json");
 
         Captured cap = capture();
-        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
-        // know that, and a value that would silently satisfy the assertions is the last thing
-        // this file needs.
-        int rc = Integer.MIN_VALUE;
-        try
+        // R3: a run must name its rule package. Without -rp this case stopped at the
+        // selection guard (exit 2, "No rule package selected") and never reached the path
+        // its name claims.
+        int rc = OfflineCli.run(new String[]
         {
-            // R3: a run must name its rule package. Without -rp this case stopped at the
-            // selection guard (exit 2, "No rule package selected") and never reached the path
-            // its name claims.
-            rc = OfflineCli.run(new String[]
-            {
-                    "-d", source.toString(), "-o", report.toString(), "-rp", "adamig-1-3", "-mp",
-                    "adam/adamig-1-3", "--rules-dir", rulesDir.toString()
-            }, cap.out, cap.err);
-        }
-        catch (RuntimeException ex)
-        {
-            // Library API may fail; ignore network-related failures.
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network"))
-            {
-                throw ex;
-            }
-            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
-            // assertions below this try never ran; returning here made JUnit record a green
-            // test that had observed nothing (and, for the two end-to-end cases, kept 27
-            // recorded mutant kills silently conditional on the CDISC Library being up).
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
-        }
+                "-d", source.toString(), "-o", report.toString(), "-rp", "adamig-1-3", "-mp",
+                "adam/adamig-1-3", "--rules-dir", rulesDir.toString()
+        }, cap.out, cap.err);
 
         assertEquals(0, rc, cap.errAsString());
         assertTrue(Files.exists(report), "JSON report must be written");
@@ -459,36 +436,11 @@ class CdiscValidateTest
         Path runtime = tempDir.resolve("rep.runtime.csv");
 
         Captured cap = capture();
-        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
-        // know that, and a value that would silently satisfy the assertions is the last thing
-        // this file needs.
-        int rc = Integer.MIN_VALUE;
-        try
+        int rc = OfflineCli.run(new String[]
         {
-            rc = OfflineCli.run(new String[]
-            {
-                    "-d", source.toString(), "-o", report.toString(), "-rp", "sdtmig-3-4", "-mp",
-                    "sdtmig/3-4", "--rules-dir", rulesDir.toString()
-            }, cap.out, cap.err);
-        }
-        catch (RuntimeException ex)
-        {
-            // Some validator paths throw when CDISC Library API is unreachable. Either way
-            // this test exercises the deeper run() code path, which is the goal for
-            // coverage. Re-raise only if the failure is unrelated to network / library.
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
-                    && !msg.contains("timeout") && !msg.contains("connect"))
-            {
-                throw ex;
-            }
-            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
-            // assertions below this try never ran; returning here made JUnit record a green
-            // test that had observed nothing (and, for the two end-to-end cases, kept 27
-            // recorded mutant kills silently conditional on the CDISC Library being up).
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
-        }
+                "-d", source.toString(), "-o", report.toString(), "-rp", "sdtmig-3-4", "-mp",
+                "sdtmig/3-4", "--rules-dir", rulesDir.toString()
+        }, cap.out, cap.err);
 
         // Successful run: rc 0 and the report + runtime CSV are written.
         assertEquals(0, rc);
@@ -642,10 +594,11 @@ class CdiscValidateTest
      * Runs an offline local validation writing {@code <name>.json} and asserts exit 0.
      *
      * <p>
-     * Review round 2 L2: there is no network-only skip here any more. Without a CDISC API key
-     * {@code configuredLibrary()} yields no provider, so no Library call is made; with a key the
-     * provider degrades on a network failure (a stated basis) rather than throwing. A skip branch
-     * could therefore never fire, and any exception is a real failure.
+     * Review rounds 2 and 3 (L2, D1): there is no network-only skip here, nor in any other case of
+     * this class. The CDISC Library is consulted only by {@code -vx} (Define-XML conformance),
+     * which no case here passes, and {@link OfflineCli} denies the dictionary and pickle-archive
+     * downloads; an expected failure is an exit code, not an exception. A skip-on-exception branch
+     * could therefore only have hidden a real engine failure as a SKIP.
      * </p>
      */
     private Captured runOffline(Path source, Path rulesDir, String name, String... extra)
@@ -847,34 +800,12 @@ class CdiscValidateTest
         writeCdiscManifest(rulesDir, rulesFile);
 
         Captured cap = capture();
-        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
-        // know that, and a value that would silently satisfy the assertions is the last thing
-        // this file needs.
-        int rc = Integer.MIN_VALUE;
-        try
+        int rc = OfflineCli.run(new String[]
         {
-            rc = OfflineCli.run(new String[]
-            {
-                    "-d", source.toString(), "-rd", refLib.toString(), "-o",
-                    tempDir.resolve("rd.json").toString(), "-rp", "sdtmig-3-4", "-mp", "sdtmig/3-4",
-                    "--rules-dir", rulesDir.toString()
-            }, cap.out, cap.err);
-        }
-        catch (RuntimeException ex)
-        {
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
-                    && !msg.contains("timeout") && !msg.contains("connect"))
-            {
-                throw ex;
-            }
-            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
-            // assertions below this try never ran; returning here made JUnit record a green
-            // test that had observed nothing (and, for the two end-to-end cases, kept 27
-            // recorded mutant kills silently conditional on the CDISC Library being up).
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
-        }
+                "-d", source.toString(), "-rd", refLib.toString(), "-o",
+                tempDir.resolve("rd.json").toString(), "-rp", "sdtmig-3-4", "-mp", "sdtmig/3-4",
+                "--rules-dir", rulesDir.toString()
+        }, cap.out, cap.err);
         assertEquals(0, rc);
         assertTrue(Files.exists(tempDir.resolve("rd.json")));
     }
@@ -945,10 +876,7 @@ class CdiscValidateTest
         java.util.logging.Level previousLevel = serviceLog.getLevel();
         serviceLog.addHandler(infoHandler);
         serviceLog.setLevel(java.util.logging.Level.INFO);
-        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
-        // know that, and a value that would silently satisfy the assertions is the last thing
-        // this file needs.
-        int rc = Integer.MIN_VALUE;
+        int rc;
         try
         {
             // R3: a run must name its rule package. Without -rp this case stopped at the
@@ -959,21 +887,6 @@ class CdiscValidateTest
                     "-d", source.toString(), "-rd", refLib.toString(), "-o", report.toString(),
                     "-rp", "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
             }, cap.out, cap.err);
-        }
-        catch (RuntimeException ex)
-        {
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
-                    && !msg.contains("timeout") && !msg.contains("connect"))
-            {
-                throw ex;
-            }
-            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
-            // assertions below this try never ran; returning here made JUnit record a green
-            // test that had observed nothing (and, for the two end-to-end cases, kept 27
-            // recorded mutant kills silently conditional on the CDISC Library being up).
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
         }
         finally
         {
@@ -1030,36 +943,14 @@ class CdiscValidateTest
         Path report = tempDir.resolve("ds.json");
 
         Captured cap = capture();
-        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
-        // know that, and a value that would silently satisfy the assertions is the last thing
-        // this file needs.
-        int rc = Integer.MIN_VALUE;
-        try
+        // R3: a run must name its rule package. Without -rp this case stopped at the
+        // selection guard (exit 2, "No rule package selected") and never reached the path
+        // its name claims.
+        int rc = OfflineCli.run(new String[]
         {
-            // R3: a run must name its rule package. Without -rp this case stopped at the
-            // selection guard (exit 2, "No rule package selected") and never reached the path
-            // its name claims.
-            rc = OfflineCli.run(new String[]
-            {
-                    "-d", source.toString(), "-ds", "DM", "-o", report.toString(), "-rp",
-                    "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
-            }, cap.out, cap.err);
-        }
-        catch (RuntimeException ex)
-        {
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
-                    && !msg.contains("timeout") && !msg.contains("connect"))
-            {
-                throw ex;
-            }
-            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
-            // assertions below this try never ran; returning here made JUnit record a green
-            // test that had observed nothing (and, for the two end-to-end cases, kept 27
-            // recorded mutant kills silently conditional on the CDISC Library being up).
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
-        }
+                "-d", source.toString(), "-ds", "DM", "-o", report.toString(), "-rp", "sdtmig-3-4",
+                "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
+        }, cap.out, cap.err);
 
         assertEquals(0, rc, cap.errAsString());
         assertTrue(Files.exists(report), "JSON report must be written");
@@ -1113,10 +1004,7 @@ class CdiscValidateTest
         String savedUserDir = System.getProperty("user.dir");
         Path runtime = tempDir.resolve("nout-rt.csv");
         Captured cap = capture();
-        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
-        // know that, and a value that would silently satisfy the assertions is the last thing
-        // this file needs.
-        int rc = Integer.MIN_VALUE;
+        int rc;
         try
         {
             System.setProperty("user.dir", tempDir.toString());
@@ -1129,21 +1017,6 @@ class CdiscValidateTest
                     "-d", source.toString(), "--runtime-report", runtime.toString(), "-rp",
                     "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
             }, cap.out, cap.err);
-        }
-        catch (RuntimeException ex)
-        {
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
-                    && !msg.contains("timeout") && !msg.contains("connect"))
-            {
-                throw ex;
-            }
-            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
-            // assertions below this try never ran; returning here made JUnit record a green
-            // test that had observed nothing (and, for the two end-to-end cases, kept 27
-            // recorded mutant kills silently conditional on the CDISC Library being up).
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
         }
         finally
         {
@@ -1257,34 +1130,11 @@ class CdiscValidateTest
         Path report = tempDir.resolve("rf.json");
 
         Captured cap = capture();
-        // Sentinel, not a default: Assumptions.abort() below always throws, but javac cannot
-        // know that, and a value that would silently satisfy the assertions is the last thing
-        // this file needs.
-        int rc = Integer.MIN_VALUE;
-        try
+        int rc = OfflineCli.run(new String[]
         {
-            rc = OfflineCli.run(new String[]
-            {
-                    "-d", source.toString(), "--rules-file", rulesFile.toString(), "-mp",
-                    "sdtmig/3-4", "-o", report.toString(), "--rules-dir", tempDir.toString()
-            }, cap.out, cap.err);
-        }
-        catch (RuntimeException ex)
-        {
-            // Library API may be unreachable; ignore only network / library failures.
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
-                    && !msg.contains("timeout") && !msg.contains("connect"))
-            {
-                throw ex;
-            }
-            // C3-03: a network-conditional case must be reported SKIPPED, not PASSED. The
-            // assertions below this try never ran; returning here made JUnit record a green
-            // test that had observed nothing (and, for the two end-to-end cases, kept 27
-            // recorded mutant kills silently conditional on the CDISC Library being up).
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
-        }
+                "-d", source.toString(), "--rules-file", rulesFile.toString(), "-mp", "sdtmig/3-4",
+                "-o", report.toString(), "--rules-dir", tempDir.toString()
+        }, cap.out, cap.err);
 
         // The explicit file's rule ran: rc 0 (USUBJID exists in the fixture) and the report
         // was written.
