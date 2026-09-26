@@ -210,7 +210,8 @@ Other options worth knowing (`--help` prints the full banner):
 | `-dxp`, `--define-xml-path` | define.xml — metadata enrichment with `-d`, or the data library itself without it |
 | `-o`, `--output` | output file (default `CORE-Report-<ts>.json`) |
 | `-of`, `--output-format` | repeatable/comma-separated; the accepted names are enumerated at runtime from the report writers on the classpath (`json`, `json-2`, `xlsx`) |
-| `-vx`, `--validate-xml` | also run Define-XML conformance on `-dxp`; **requires `--define-family`** (CDISC and/or PMDA) |
+| `-vx`, `--validate-xml` | also run Define-XML conformance on `-dxp`; **requires `--define-family`** (CDISC and/or PMDA). Its `Requires: ct` / `Requires: library` rules read the metadata store like every other check; with no store they SKIP, named on the `CT basis:` / `Library basis:` stderr lines |
+| `-ct`, `--controlled-terminology-package` | CT package id, repeatable; governs the dataset run **and** `-vx` (an explicit list replaces the define's own declaration). ⚠ A named package the store does not hold **aborts the whole invocation**: exit 2, no report of either kind |
 | `-t`, `--threads` | rule worker threads per dataset (default 1) |
 | `-sl`, `--severity-level` | weakest level evaluated: Reject, Error, Warning (default) or Info |
 | `-h`, `--help` | usage |
@@ -318,6 +319,11 @@ SKIPs — loudly, by name. Three seeding modes build it, each running standalone
 
 `--seed-overwrite` re-acquires everything instead of carrying forward what the store already
 holds; `--seed-dry-run` reports what a run would change without touching it.
+
+⚠ **Store format 3 (2026-09-26).** A store seeded before it (format 2) is refused — every run on it
+exits 2 naming the file and `--seed-cache` — never read with the new fields empty; re-seed once with
+a plain `--seed-cache`. A store written by a NEWER build than this tool is refused the other way
+round (*"upgrade this tool"*): `--seed-cache` leaves it alone unless `--seed-overwrite` is passed.
 
 ⚠ `CDISC_API_CACHE` is a different thing and is **not** the store: it is the HTTP response cache
 of the CDISC Library client, and the only path that reads it is `--seed-cache-from-api`. No
