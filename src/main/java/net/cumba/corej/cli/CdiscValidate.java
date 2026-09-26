@@ -1743,7 +1743,7 @@ public final class CdiscValidate
     {
         try
         {
-            return ProductKeyResolver.resolveAllConfigured(args.metadataProducts, null, null);
+            return ProductKeyResolver.resolveAllConfigured(args.metadataProducts);
         }
         catch (IllegalArgumentException e)
         {
