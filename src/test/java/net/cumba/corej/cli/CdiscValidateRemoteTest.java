@@ -162,6 +162,37 @@ class CdiscValidateRemoteTest
     }
 
 
+    /**
+     * PLAN-report-conformance-fields P14 / R7 (remote arm): the CT declaration mismatch is the
+     * second run-level note the local path prints, and it reaches stderr in remote mode the same
+     * way the dictionary basis does — from {@code Conformance_Details/CT_Declaration_Mismatch} of
+     * the fetched report. The default (healthy) stub body prints none.
+     */
+    @Test
+    void remoteRunPrintsTheCtDeclarationMismatchLineWhenTheReportCarriesOne(@TempDir Path tmp)
+        throws Exception
+    {
+        Path data = studyDir(tmp, "dm.csv");
+        RunResult healthy = runCapturingErr("--remote", baseUrl(), "-d", data.toString(), "-o",
+                tmp.resolve("healthy.json").toString());
+        assertEquals(0, healthy.code());
+        assertFalse(healthy.err().contains("CT declaration mismatch:"),
+                "an agreeing remote report must not fabricate a mismatch line: " + healthy.err());
+
+        reportBody = "{\"Conformance_Details\":{\"Standard\":\"SDTMIG\","
+                + "\"CT_Declaration_Mismatch\":\"define declares sdtmct-2023-12-15; run used "
+                + "sdtmct-2024-09-27\"},\"Issue_Details\":[]}";
+        RunResult degraded = runCapturingErr("--remote", baseUrl(), "-d", data.toString(), "-o",
+                tmp.resolve("mismatch.json").toString());
+        assertEquals(0, degraded.code());
+        assertTrue(
+                degraded.err()
+                        .contains("CT declaration mismatch: define declares "
+                                + "sdtmct-2023-12-15; run used sdtmct-2024-09-27"),
+                "the mismatch must reach stderr in remote mode too: " + degraded.err());
+    }
+
+
     @Test
     void json2FormatFetchesV2ReportAndWritesV2File(@TempDir Path tmp) throws Exception
     {

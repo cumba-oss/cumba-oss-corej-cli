@@ -21,7 +21,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import net.cumba.cdisc.library.api.client.CdiscLibraryClient;
 import net.cumba.corej.core.CoreLibraryAccess;
-import net.cumba.corej.core.VersionInfo;
 import net.cumba.corej.core.metadata.dictionary.DictionaryConverter;
 import net.cumba.corej.core.metadata.dictionary.DictionaryDirectoryResolver;
 import net.cumba.corej.core.metadata.dictionary.DictionaryInstaller;
@@ -207,9 +206,6 @@ import picocli.CommandLine.ParseResult;
 @lombok.CustomLog
 public final class CdiscValidate
 {
-
-    private static final String CORE_ENGINE_VERSION = VersionInfo
-            .forArtifact("cumba-oss-corej-core").version();
 
     /**
      * The report-writer registry. Every {@code --output-format} decision — the parser's allowlist,
@@ -668,6 +664,7 @@ public final class CdiscValidate
                 Path outputBase = resolveOutputBase(args.output);
                 List<Path> writtenPaths = new ArrayList<>();
                 String dictionaryBasis = null;
+                String ctDeclarationMismatch = null;
                 for (String format : formats)
                 {
                     Path path = reportPathFor(outputBase, format);
@@ -677,15 +674,24 @@ public final class CdiscValidate
                     writtenPaths.add(path);
                     if (dictionaryBasis == null)
                     {
-                        dictionaryBasis = dictionaryBasisOf(body);
+                        dictionaryBasis = conformanceNoteOf(body, "Dictionary_Basis");
+                    }
+                    if (ctDeclarationMismatch == null)
+                    {
+                        ctDeclarationMismatch = conformanceNoteOf(body, "CT_Declaration_Mismatch");
                     }
                 }
                 // D13 surface 5 holds in remote mode too: the degradation line the local path
                 // prints must not vanish just because the engine ran on the server. The fetched
-                // report carries it as Conformance_Details/Dictionary_Basis.
+                // report carries it as Conformance_Details/Dictionary_Basis — and, since
+                // PLAN-report-conformance-fields R7, the CT declaration mismatch the same way.
                 if (dictionaryBasis != null)
                 {
                     err.println("Dictionary basis: " + dictionaryBasis);
+                }
+                if (ctDeclarationMismatch != null)
+                {
+                    err.println("CT declaration mismatch: " + ctDeclarationMismatch);
                 }
                 LOGGER.log(System.Logger.Level.INFO,
                         "Validation complete (remote): {0} findings. Report: {1}",
@@ -1050,18 +1056,18 @@ public final class CdiscValidate
 
 
     /**
-     * The {@code Dictionary_Basis} value carried by a fetched remote report body, or {@code null}
-     * when the run was healthy (the field is present only on a degraded run) or the body is not
-     * JSON. {@code findValue} searches the tree, so both the v1 layout
-     * ({@code Conformance_Details.Dictionary_Basis}) and any nesting the v2 report uses are found
-     * without pinning this client to one shape.
+     * The run-level note {@code aKey} ({@code Dictionary_Basis} or {@code CT_Declaration_Mismatch})
+     * carried by a fetched remote report body, or {@code null} when the run was healthy (each field
+     * is present only on a degraded run) or the body is not JSON. {@code findValue} searches the
+     * tree, so both the v1 layout ({@code Conformance_Details.<key>}) and any nesting the v2 report
+     * uses are found without pinning this client to one shape.
      */
-    private static @Nullable String dictionaryBasisOf(String aReportBody)
+    private static @Nullable String conformanceNoteOf(String aReportBody, String aKey)
     {
         try
         {
             JsonNode basis = new com.fasterxml.jackson.databind.ObjectMapper().readTree(aReportBody)
-                    .findValue("Dictionary_Basis");
+                    .findValue(aKey);
             return basis != null && basis.isTextual() ? basis.asText() : null;
         }
         catch (com.fasterxml.jackson.core.JacksonException _)
@@ -1586,7 +1592,10 @@ public final class CdiscValidate
             StudyValidationParams params = toParams(args, manager, listener);
             try
             {
-                result = new StudyValidationService(CORE_ENGINE_VERSION).validate(params);
+                // The service stamps the engine jar's OWN version (PLAN-report-conformance-fields
+                // D4/D5); this CLI no longer names the engine's artifact id, which is how it
+                // stamped "unknown" for weeks after the 2026-09 rename.
+                result = new StudyValidationService().validate(params);
             }
             catch (StudyValidationException e)
             {
@@ -1605,6 +1614,13 @@ public final class CdiscValidate
         if (dictionaryBasis != null)
         {
             err.println("Dictionary basis: " + dictionaryBasis);
+        }
+        // PLAN-report-conformance-fields R7 (define-ct §4.2 P7): the CT declaration mismatch is
+        // the same kind of run-level note, printed the same way, only when the report carries it.
+        String ctDeclarationMismatch = result.conformance().ctDeclarationMismatch();
+        if (ctDeclarationMismatch != null)
+        {
+            err.println("CT declaration mismatch: " + ctDeclarationMismatch);
         }
 
         // Phase E: write report(s) — one file per requested format, all sharing the base name.
@@ -2645,11 +2661,12 @@ public final class CdiscValidate
         /**
          * Per-rule findings cap (per dataset). Accepts a plain integer; for Python-CLI
          * compatibility a tuple form like {@code "(1000, True)"} is tolerated — the leading integer
-         * is used. {@code 0} means unlimited; a <b>negative</b> cap is a usage error and never
-         * reaches the engine (2026-09-08 ruling — {@code EngineLimits.resolve} would treat it as
-         * unlimited too, but a negative is far more likely a typo than an intent). Null follows the
-         * engine default ({@code -Dcorej.maxErrorsPerRule}, then {@code MAX_ERRORS_PER_RULE}, then
-         * 1000).
+         * is used, and a {@code False} flag (a cumulative cap this engine does not have) is
+         * accepted with a stderr warning. {@code 0} means unlimited; a <b>negative</b> cap is a
+         * usage error and never reaches the engine (2026-09-08 ruling —
+         * {@code EngineLimits.resolve} would treat it as unlimited too, but a negative is far more
+         * likely a typo than an intent). Null follows the engine default
+         * ({@code -Dcorej.maxErrorsPerRule}, then {@code MAX_ERRORS_PER_RULE}, then 1000).
          */
         @Option(names =
         {
@@ -3119,12 +3136,25 @@ public final class CdiscValidate
                 // "5)" and "(5, True" were read as 5, and "[A-Za-z]+" accepted "(5, banana)".
                 java.util.regex.Matcher m = java.util.regex.Pattern
                         .compile("^(?:(-?\\d+)"
-                                + "|\\(\\s*(-?\\d+)\\s*(?:,\\s*(?:[Tt]rue|[Ff]alse)\\s*)?\\))$")
+                                + "|\\(\\s*(-?\\d+)\\s*(?:,\\s*([Tt]rue|[Ff]alse)\\s*)?\\))$")
                         .matcher(a.maxErrorsRaw.trim());
                 if (!m.matches())
                 {
                     throw new UsageException("--max-errors-per-rule expects an integer or the "
                             + "Python-CLI \"(N, bool)\" tuple form, got: " + a.maxErrorsRaw);
+                }
+                // PLAN-report-conformance-fields T1-3 (owner: warn, keep accepting). The tuple's
+                // boolean asked the Python CLI for a per-dataset cap (True) or a cumulative one
+                // (False). This engine's cap is ALWAYS per rule and dataset, so "False" is a
+                // request it cannot honour; it is accepted for script compatibility and said so,
+                // because the report will state Issue_Limit_Per_Dataset: "True" for the run.
+                String tupleFlag = m.group(3);
+                if (tupleFlag != null && "false".equals(tupleFlag.toLowerCase(Locale.ROOT)))
+                {
+                    err.println("Warning: --max-errors-per-rule " + a.maxErrorsRaw.trim()
+                            + " asks for a cumulative (across-datasets) cap, which this engine "
+                            + "does not have; the cap is applied per rule and dataset, and the "
+                            + "report says so (Issue_Limit_Per_Dataset: True).");
                 }
                 int cap;
                 try

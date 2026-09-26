@@ -1,6 +1,7 @@
 package net.cumba.corej.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -495,6 +496,196 @@ class CdiscValidateTest
         assertTrue(Files.exists(runtime), "runtime CSV must be written");
         String runtimeContent = Files.readString(runtime, StandardCharsets.UTF_8);
         assertTrue(runtimeContent.startsWith("domain,fileName,rowCount,columnCount,coreId,"));
+    }
+
+
+    /**
+     * PLAN-report-conformance-fields P8: the report's conformance header states the cap the run
+     * applied and the engine jar's own version. {@code -me 2} over a rule that flags all three DM
+     * rows lists exactly two of them and says {@code "2"} / {@code "True"}; {@code -me 0} says
+     * {@code "None"} / {@code "None"}. Unfixed, both limit fields read {@code "None"} always.
+     */
+    @Test
+    void run_endToEnd_reportStatesTheAppliedCapAndTheEngineVersion() throws Exception
+    {
+        Path source = makeSourceFolderWithCsv();
+        Path rulesDir = Files.createDirectory(tempDir.resolve("rules-cap-" + System.nanoTime()));
+        Path rulesFile = rulesDir.resolve("rules-sdtmig-3-4.json");
+        Files.writeString(rulesFile, """
+                {
+                  "rules": {
+                    "u1": {
+                      "id": "u1",
+                      "Core": {"Id": "CORE-TEST-CAP"},
+                      "Sensitivity": "Record",
+                      "Check": {"expression": "not empty(USUBJID)"}
+                    }
+                  }
+                }
+                """);
+        writeCdiscManifest(rulesDir, rulesFile);
+
+        JsonNode capped = conformanceOfRun(source, rulesDir, "capped", "-me", "2");
+        assertEquals("2", capped.path("Issue_Limit_Per_Rule").asText());
+        assertEquals("True", capped.path("Issue_Limit_Per_Dataset").asText());
+        // Per rule AND per dataset: the source folder holds dm.csv (3 rows) and vs.csv, and each
+        // dataset is capped on its own — DM lists exactly 2 of its 3 rows.
+        assertEquals(2, issueRows(tempDir.resolve("capped.json"), "CORE-TEST-CAP", "dm.csv"),
+                "the cap really applied to the listed DM findings");
+        String engine = net.cumba.corej.core.VersionInfo
+                .forClass(net.cumba.corej.core.run.StudyValidationService.class).version();
+        assertNotEquals("unknown", engine, "CONTROL FAILED: the engine jar is unfiltered");
+        assertEquals(engine, capped.path("CORE_Engine_Version").asText());
+
+        JsonNode unlimited = conformanceOfRun(source, rulesDir, "unlimited", "-me", "0");
+        assertEquals("None", unlimited.path("Issue_Limit_Per_Rule").asText());
+        assertEquals("None", unlimited.path("Issue_Limit_Per_Dataset").asText());
+        assertEquals(3, issueRows(tempDir.resolve("unlimited.json"), "CORE-TEST-CAP", "dm.csv"),
+                "without a cap every DM row is listed (the fixture flags all three)");
+    }
+
+
+    /**
+     * PLAN-report-conformance-fields P14 / R7 (local arm): a run whose Define-XML declares a CT
+     * package the run did not use prints the CT declaration mismatch on stderr, beside the
+     * dictionary-basis line; a run with no such divergence prints nothing. Before R7 the line was
+     * absent on every run.
+     */
+    @Test
+    void run_endToEnd_printsTheCtDeclarationMismatchOnStderr() throws Exception
+    {
+        Path source = makeSourceFolderWithCsv();
+        Path rulesDir = Files.createDirectory(tempDir.resolve("rules-ct-" + System.nanoTime()));
+        Path rulesFile = rulesDir.resolve("rules-sdtmig-3-4.json");
+        Files.writeString(rulesFile, """
+                {
+                  "rules": {
+                    "u1": {
+                      "id": "u1",
+                      "Core": {"Id": "CORE-TEST-CT"},
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
+                    }
+                  }
+                }
+                """);
+        writeCdiscManifest(rulesDir, rulesFile);
+        // The full VLM fixture (a define the overlay library can open) with ONE addition: a
+        // declared CT package the run below will not use.
+        // The define library supplier accepts only a path ending in "/define.xml".
+        Path define = Files.createDirectory(tempDir.resolve("ct-define")).resolve("define.xml");
+        String fixture;
+        try (var in = CdiscValidateTest.class.getResourceAsStream("/define/define-vlm-e2e.xml"))
+        {
+            assertNotNull(in);
+            fixture = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        String opening = "StandardVersion=\"3.4\">";
+        assertTrue(fixture.contains(opening), "fixture shape changed: " + opening);
+        Files.writeString(define, fixture.replace(opening, opening + """
+
+                      <def:Standards>
+                        <def:Standard OID="STD.CT" Name="CDISC/NCI" Type="CT" PublishingSet="SDTM"
+                                      Version="2023-12-15" Status="Final"/>
+                      </def:Standards>
+                """));
+
+        Captured mismatch = runOffline(source, rulesDir, "ct-mismatch", "-dxp", define.toString(),
+                "-ct", "sdtmct-2024-09-27");
+        assertTrue(mismatch.errAsString().contains(
+                "CT declaration mismatch: define declares sdtmct-2023-12-15; run used sdtmct-2024-09-27"),
+                mismatch.errAsString());
+
+        Captured agreeing = runOffline(source, rulesDir, "ct-agree", "-dxp", define.toString());
+        assertFalse(agreeing.errAsString().contains("CT declaration mismatch"),
+                "declaration and selection agree, so no line: " + agreeing.errAsString());
+    }
+
+
+    /**
+     * PLAN-report-conformance-fields T1-3 (owner: warn, keep accepting): the Python-CLI tuple's
+     * {@code False} asked for a cumulative cap this engine does not have. The value is still
+     * accepted (the cap is 5) and a warning says what will actually happen.
+     */
+    @Test
+    void maxErrorsPerRule_tupleWithFalseFlag_isAcceptedWithAWarning() throws Exception
+    {
+        Captured warned = capture();
+        CdiscValidate.Args parsed = CdiscValidate.Args.parse(new String[]
+        {
+                "-d", "/tmp", "-me", "(5, False)"
+        }, warned.err);
+        assertEquals(5, parsed.maxErrorsPerRule);
+        assertTrue(warned.errAsString().contains("Warning: --max-errors-per-rule (5, False)"),
+                warned.errAsString());
+        assertTrue(warned.errAsString().contains("per rule and dataset"), warned.errAsString());
+
+        Captured quiet = capture();
+        CdiscValidate.Args trueFlag = CdiscValidate.Args.parse(new String[]
+        {
+                "-d", "/tmp", "-me", "(5, True)"
+        }, quiet.err);
+        assertEquals(5, trueFlag.maxErrorsPerRule);
+        assertEquals("", quiet.errAsString(), "True is what the engine does: no warning");
+    }
+
+
+    /**
+     * Runs an offline local validation writing {@code <name>.json}; abort if the Library is
+     * unreachable.
+     */
+    private Captured runOffline(Path source, Path rulesDir, String name, String... extra)
+        throws Exception
+    {
+        List<String> argv = new ArrayList<>(List.of("-d", source.toString(), "-o",
+                tempDir.resolve(name + ".json").toString(), "-rp", "sdtmig-3-4", "-mp",
+                "sdtmig/3-4", "--rules-dir", rulesDir.toString()));
+        argv.addAll(List.of(extra));
+        Captured cap = capture();
+        int rc;
+        try
+        {
+            rc = OfflineCli.run(argv.toArray(new String[0]), cap.out, cap.err);
+        }
+        catch (RuntimeException ex)
+        {
+            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
+            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
+                    && !msg.contains("timeout") && !msg.contains("connect"))
+            {
+                throw ex;
+            }
+            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
+                    + ex.getMessage());
+            throw ex; // unreachable: abort() throws
+        }
+        assertEquals(0, rc, cap.errAsString());
+        return cap;
+    }
+
+
+    private JsonNode conformanceOfRun(Path source, Path rulesDir, String name, String... extra)
+        throws Exception
+    {
+        runOffline(source, rulesDir, name, extra);
+        Path report = tempDir.resolve(name + ".json");
+        assertTrue(Files.exists(report), "JSON report must be written");
+        return MAPPER.readTree(report.toFile()).path("Conformance_Details");
+    }
+
+
+    private static long issueRows(Path report, String coreId, String dataset)
+        throws java.io.IOException
+    {
+        long n = 0;
+        for (JsonNode row : MAPPER.readTree(report.toFile()).path("Issue_Details"))
+        {
+            if (coreId.equals(row.path("core_id").asText())
+                    && dataset.equalsIgnoreCase(row.path("dataset").asText()))
+            {
+                n++;
+            }
+        }
+        return n;
     }
 
 
