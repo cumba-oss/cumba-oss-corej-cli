@@ -223,7 +223,9 @@ class CdiscValidateUsageTest
         // 149 since PLAN-define-ct-evaluation P4: -vx says where its CT and library come from and
         // that a named CT package the store lacks aborts (+4), -ct says it governs -vx too (+2),
         // and the Authentication block says the key is for --seed-cache-from-api only (+2).
-        assertEquals(149, lineCount, "help banner line count changed: " + lineCount);
+        // 152 since PLAN-use-case-scope-filter L1: -uc says it is one code and that rules naming
+        // only other use cases are reported SKIPPED (1 line -> 4).
+        assertEquals(152, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();
