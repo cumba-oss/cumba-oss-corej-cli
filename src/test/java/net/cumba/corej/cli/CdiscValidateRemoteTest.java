@@ -193,6 +193,55 @@ class CdiscValidateRemoteTest
     }
 
 
+    /**
+     * PLAN-report-conformance-fields review M1: {@code -me} and {@code -sl} used to be DROPPED from
+     * the remote request, so a remote run silently took the server's defaults while the local run
+     * honoured them. Both now travel: the cap as a number, the threshold as its JSON display value.
+     * The T1-3 warning for {@code "(N, False)"} holds in remote mode too.
+     */
+    @Test
+    void remoteRequestCarriesTheCapAndTheSeverityThreshold(@TempDir Path tmp) throws Exception
+    {
+        Path data = studyDir(tmp, "dm.csv");
+        RunResult res = runCapturingErr("--remote", baseUrl(), "-d", data.toString(), "-o",
+                tmp.resolve("o.json").toString(), "-me", "(2, False)", "-sl", "Error");
+
+        assertEquals(0, res.code());
+        assertTrue(startBody.get().contains("\"maxErrorsPerRule\":2"), startBody.get());
+        assertTrue(startBody.get().contains("\"severityThreshold\":\"Error\""), startBody.get());
+        assertTrue(res.err().contains("Warning: --max-errors-per-rule (2, False)"), res.err());
+
+        // Neither field is fabricated when neither option is given.
+        startBody.set(null);
+        assertEquals(0, run("--remote", baseUrl(), "-d", data.toString(), "-o",
+                tmp.resolve("o2.json").toString()));
+        assertFalse(startBody.get().contains("maxErrorsPerRule"), startBody.get());
+        assertFalse(startBody.get().contains("severityThreshold"), startBody.get());
+    }
+
+
+    /**
+     * Review M1's sweep: the options that only a LOCAL engine can honour say so in remote mode
+     * instead of vanishing — the same shape as the {@code -vx} and {@code -ct} notes.
+     */
+    @Test
+    void localOnlyOptionsAreNotedInRemoteMode(@TempDir Path tmp) throws Exception
+    {
+        Path data = studyDir(tmp, "dm.csv");
+        RunResult res = runCapturingErr("--remote", baseUrl(), "-d", data.toString(), "-o",
+                tmp.resolve("o.json").toString(), "--rules-dir", tmp.toString(), "--runtime-report",
+                tmp.resolve("rt.csv").toString(), "--meddra-version", "27.0");
+
+        assertEquals(0, res.code());
+        assertTrue(res.err().contains("Note: --rules-dir names a local rules directory"),
+                res.err());
+        assertTrue(res.err().contains("Note: --runtime-report"), res.err());
+        assertTrue(res.err().contains("Note: --dictionaries-dir and the --<dictionary>-version"),
+                res.err());
+        assertFalse(Files.exists(tmp.resolve("rt.csv")), "no runtime CSV is written remotely");
+    }
+
+
     @Test
     void json2FormatFetchesV2ReportAndWritesV2File(@TempDir Path tmp) throws Exception
     {

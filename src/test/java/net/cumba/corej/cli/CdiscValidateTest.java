@@ -626,6 +626,15 @@ class CdiscValidateTest
         }, quiet.err);
         assertEquals(5, trueFlag.maxErrorsPerRule);
         assertEquals("", quiet.errAsString(), "True is what the engine does: no warning");
+
+        // Review L1: "(0, False)" asks for no cap at all — nothing is unhonoured, no warning.
+        Captured unlimited = capture();
+        CdiscValidate.Args noCap = CdiscValidate.Args.parse(new String[]
+        {
+                "-d", "/tmp", "-me", "(0, False)"
+        }, unlimited.err);
+        assertEquals(0, noCap.maxErrorsPerRule);
+        assertEquals("", unlimited.errAsString(), "an unlimited cap has no per-dataset reading");
     }
 
 
@@ -646,16 +655,20 @@ class CdiscValidateTest
         {
             rc = OfflineCli.run(argv.toArray(new String[0]), cap.out, cap.err);
         }
-        catch (RuntimeException ex)
+        catch (java.io.UncheckedIOException ex)
         {
-            String msg = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.ROOT);
-            if (!msg.contains("cdisc") && !msg.contains("library") && !msg.contains("network")
-                    && !msg.contains("timeout") && !msg.contains("connect"))
+            // Review L6: only a NETWORK failure of the configured CDISC Library may turn this
+            // case into a skip. Any other exception is a real failure and propagates.
+            java.io.IOException cause = ex.getCause();
+            if (!(cause instanceof java.net.ConnectException
+                    || cause instanceof java.net.UnknownHostException
+                    || cause instanceof java.net.SocketTimeoutException
+                    || cause instanceof java.net.http.HttpTimeoutException))
             {
                 throw ex;
             }
-            Assumptions.abort("the CDISC Library was unreachable, so this case could not run: "
-                    + ex.getMessage());
+            Assumptions.abort(
+                    "the CDISC Library was unreachable, so this case could not run: " + cause);
             throw ex; // unreachable: abort() throws
         }
         assertEquals(0, rc, cap.errAsString());

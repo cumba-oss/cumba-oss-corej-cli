@@ -593,6 +593,24 @@ public final class CdiscValidate
             err.println("Note: -vx / --validate-xml (Define-XML conformance) is a local-mode "
                     + "feature and is ignored in --remote mode.");
         }
+        // PLAN-report-conformance-fields review M1 (the sweep it asked for): the remaining
+        // options that only mean something to a LOCAL engine, each said so instead of dropped.
+        if (args.rulesDir != null)
+        {
+            err.println("Note: --rules-dir names a local rules directory; in --remote mode the "
+                    + "server's own rules are used and it is ignored (upload extra rules with "
+                    + "--rules-file).");
+        }
+        if (args.runtimeReport != null)
+        {
+            err.println("Note: --runtime-report (the per-rule runtime CSV) is written by a local "
+                    + "run only and is ignored in --remote mode.");
+        }
+        if (args.dictionariesDir != null || !args.dictionaryVersions().isEmpty())
+        {
+            err.println("Note: --dictionaries-dir and the --<dictionary>-version options are "
+                    + "server-side configuration in --remote mode and are ignored by the client.");
+        }
         if (args.rulesFiles.size() > 1)
         {
             err.println("Note: --remote mode uploads only the first --rules-file.");
@@ -1036,6 +1054,13 @@ public final class CdiscValidate
             req.put("datasetFilter", new ArrayList<>(datasetFilter));
         }
         req.put("ruleThreads", args.ruleThreads);
+        // PLAN-report-conformance-fields review M1: -me and -sl used to be dropped here, so a
+        // remote run silently used the server's defaults while the local run honoured them (and
+        // the report then said so — Issue_Limit_Per_Rule is the value the SERVER applied). The
+        // REST CheckRunRequest has carried both fields all along; Severity serialises to its
+        // JSON display value ("Warning"), which the server's parser accepts.
+        putIfNotNull(req, "maxErrorsPerRule", args.maxErrorsPerRule);
+        putIfNotNull(req, "severityThreshold", args.severityThreshold);
         return req;
     }
 
@@ -3143,19 +3168,6 @@ public final class CdiscValidate
                     throw new UsageException("--max-errors-per-rule expects an integer or the "
                             + "Python-CLI \"(N, bool)\" tuple form, got: " + a.maxErrorsRaw);
                 }
-                // PLAN-report-conformance-fields T1-3 (owner: warn, keep accepting). The tuple's
-                // boolean asked the Python CLI for a per-dataset cap (True) or a cumulative one
-                // (False). This engine's cap is ALWAYS per rule and dataset, so "False" is a
-                // request it cannot honour; it is accepted for script compatibility and said so,
-                // because the report will state Issue_Limit_Per_Dataset: "True" for the run.
-                String tupleFlag = m.group(3);
-                if (tupleFlag != null && "false".equals(tupleFlag.toLowerCase(Locale.ROOT)))
-                {
-                    err.println("Warning: --max-errors-per-rule " + a.maxErrorsRaw.trim()
-                            + " asks for a cumulative (across-datasets) cap, which this engine "
-                            + "does not have; the cap is applied per rule and dataset, and the "
-                            + "report says so (Issue_Limit_Per_Dataset: True).");
-                }
                 int cap;
                 try
                 {
@@ -3172,6 +3184,22 @@ public final class CdiscValidate
                             + "negative cap has no meaning), got: " + a.maxErrorsRaw);
                 }
                 a.maxErrorsPerRule = cap;
+                // PLAN-report-conformance-fields T1-3 (owner: warn, keep accepting). The tuple's
+                // boolean asked the Python CLI for a per-dataset cap (True) or a cumulative one
+                // (False). This engine's cap is ALWAYS per rule and dataset, so "False" is a
+                // request it cannot honour; it is accepted for script compatibility and said so,
+                // because the report will state Issue_Limit_Per_Dataset: "True" for the run.
+                // Only for a FINITE cap: "(0, False)" asks for no cap at all, and there is
+                // nothing to warn about (review L1). A negative cap never gets here.
+                String tupleFlag = m.group(3);
+                if (cap > 0 && tupleFlag != null
+                        && "false".equals(tupleFlag.toLowerCase(Locale.ROOT)))
+                {
+                    err.println("Warning: --max-errors-per-rule " + a.maxErrorsRaw.trim()
+                            + " asks for a cumulative (across-datasets) cap, which this engine "
+                            + "does not have; the cap is applied per rule and dataset, and the "
+                            + "report says so (Issue_Limit_Per_Dataset: True).");
+                }
             }
 
             // Cache seeding and dictionary installation are standalone maintenance modes: they

@@ -1,9 +1,16 @@
 package net.cumba.corej.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.stream.Stream;
 import net.cumba.corej.core.VersionInfo;
 import net.cumba.corej.core.run.StudyValidationService;
 import org.junit.jupiter.api.Test;
@@ -48,17 +55,32 @@ class CdiscValidateEngineVersionTest
 
 
     /**
-     * D5: the CLI no longer carries an engine artifact id. A constant named
-     * {@code CORE_ENGINE_VERSION} coming back would be the hard-coded id returning, which is the
-     * exact shape that stamped {@code "unknown"} for weeks.
+     * D5, as BEHAVIOUR rather than a field name (review L7): no main source of this CLI looks an
+     * engine version up by artifact id any more. A {@code VersionInfo.forArtifact(} call or a
+     * {@code "…corej-core"} literal coming back would be the hard-coded id returning, which is the
+     * exact shape that stamped {@code "unknown"} for weeks. The value the CLI stamps is pinned end
+     * to end by
+     * {@code CdiscValidateTest.run_endToEnd_reportStatesTheAppliedCapAndTheEngineVersion}.
      */
     @Test
-    void theCliCarriesNoHardCodedEngineArtifactId()
+    void noMainSourceLooksTheEngineVersionUpByArtifactId() throws IOException
     {
-        assertThrows(NoSuchFieldException.class,
-                () -> CdiscValidate.class.getDeclaredField("CORE_ENGINE_VERSION"),
-                "CdiscValidate must not carry a CORE_ENGINE_VERSION constant: the engine version "
-                        + "is the engine jar's own (StudyValidationService())");
+        Path mainJava = Path.of(System.getProperty("projectBasedir", ".")).resolve("src/main/java");
+        List<Path> sources;
+        try (Stream<Path> walk = Files.walk(mainJava))
+        {
+            sources = walk.filter(p -> p.toString().endsWith(".java")).toList();
+        }
+        assertTrue(sources.stream().anyMatch(p -> p.endsWith("CdiscValidate.java")),
+                "CONTROL: the main sources were found under " + mainJava + ": " + sources);
+        for (Path source : sources)
+        {
+            String text = Files.readString(source, StandardCharsets.UTF_8);
+            assertFalse(text.contains("forArtifact("),
+                    source + " must not look an engine version up by artifact id");
+            assertFalse(text.contains("corej-core\""),
+                    source + " must not carry the engine's artifact id as a literal");
+        }
     }
 
 
