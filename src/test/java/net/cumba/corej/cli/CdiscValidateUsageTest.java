@@ -55,8 +55,9 @@ class CdiscValidateUsageTest
             "findings materialised per rule, per dataset",
             "(default 1000, from -Dcorej.maxErrorsPerRule",
             "then MAX_ERRORS_PER_RULE; 0 = unlimited, a", "negative value is a usage error).",
-            "Extra violations are counted, not listed.", "-ds, --dataset <name>[,<name>..]",
-            "validate only these library members (others",
+            "Extra violations are counted, not listed.",
+            "That default is local; without -me, --remote", "uses the server's configured default.",
+            "-ds, --dataset <name>[,<name>..]", "validate only these library members (others",
             "become lazy references; repeatable, comma-sep)", "-rd, --reference-data <path>",
             "extra reference library (dir with define.xml",
             "or define.xml directly); repeatable. Use to",
@@ -121,8 +122,9 @@ class CdiscValidateUsageTest
             "findings materialised per rule, per dataset",
             "(default 1000, from -Dcorej.maxErrorsPerRule",
             "then MAX_ERRORS_PER_RULE; 0 = unlimited, a", "negative value is a usage error).",
-            "Extra violations are counted, not listed.", "-ds, --dataset <name>[,<name>..]",
-            "validate only these library members (others",
+            "Extra violations are counted, not listed.",
+            "That default is local; without -me, --remote", "uses the server's configured default.",
+            "-ds, --dataset <name>[,<name>..]", "validate only these library members (others",
             "become lazy references; repeatable, comma-sep)", "-rd, --reference-data <path>",
             "extra reference library (dir with define.xml",
             "or define.xml directly); repeatable. Use to",
@@ -213,7 +215,9 @@ class CdiscValidateUsageTest
         // 139 since cache 8b-1 re-pointed -ca at the unified metadata store (1 line -> 3, the
         // cascade), retired the 4-line -pc block, and grew the seeding block: --seed-cache-from-api
         // (+2 lines) and a two-line --seed-overwrite wording for refresh semantics (+1).
-        assertEquals(139, lineCount, "help banner line count changed: " + lineCount);
+        // 141 since PLAN-report-conformance-fields review round 2 L3: -me states that its default
+        // chain is local and that --remote without -me takes the server's configured default.
+        assertEquals(141, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();

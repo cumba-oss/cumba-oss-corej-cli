@@ -611,10 +611,6 @@ public final class CdiscValidate
             err.println("Note: --dictionaries-dir and the --<dictionary>-version options are "
                     + "server-side configuration in --remote mode and are ignored by the client.");
         }
-        if (args.rulesFiles.size() > 1)
-        {
-            err.println("Note: --remote mode uploads only the first --rules-file.");
-        }
 
         // runRemote is only reached after RemoteConfig.isRemote() (baseUrl != null) in run(...).
         String baseUrl = java.util.Objects.requireNonNull(remote.baseUrl(),
@@ -2357,6 +2353,9 @@ public final class CdiscValidate
         out.println("                                   negative value is a usage error).");
         out.println("                                   Extra violations are counted, not listed.");
         out.println(
+                "                                   That default is local; without -me, --remote");
+        out.println("                                   uses the server's configured default.");
+        out.println(
                 "  -ds, --dataset <name>[,<name>..] validate only these library members (others");
         out.println(
                 "                                   become lazy references; repeatable, comma-sep)");
@@ -2698,8 +2697,8 @@ public final class CdiscValidate
                 "-me", "--max-errors-per-rule"
         }, description = "Max findings to materialise per rule (per dataset); extra violations are "
                 + "counted but not listed. Default follows -Dcorej.maxErrorsPerRule, then "
-                + "MAX_ERRORS_PER_RULE, then 1000; 0 = unlimited, a negative value is "
-                + "rejected.")
+                + "MAX_ERRORS_PER_RULE, then 1000 (local mode; --remote uses the server's "
+                + "configured default); 0 = unlimited, a negative value is rejected.")
         @Nullable
         String maxErrorsRaw;
 

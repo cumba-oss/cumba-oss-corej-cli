@@ -639,8 +639,14 @@ class CdiscValidateTest
 
 
     /**
-     * Runs an offline local validation writing {@code <name>.json}; abort if the Library is
-     * unreachable.
+     * Runs an offline local validation writing {@code <name>.json} and asserts exit 0.
+     *
+     * <p>
+     * Review round 2 L2: there is no network-only skip here any more. Without a CDISC API key
+     * {@code configuredLibrary()} yields no provider, so no Library call is made; with a key the
+     * provider degrades on a network failure (a stated basis) rather than throwing. A skip branch
+     * could therefore never fire, and any exception is a real failure.
+     * </p>
      */
     private Captured runOffline(Path source, Path rulesDir, String name, String... extra)
         throws Exception
@@ -650,27 +656,7 @@ class CdiscValidateTest
                 "sdtmig/3-4", "--rules-dir", rulesDir.toString()));
         argv.addAll(List.of(extra));
         Captured cap = capture();
-        int rc;
-        try
-        {
-            rc = OfflineCli.run(argv.toArray(new String[0]), cap.out, cap.err);
-        }
-        catch (java.io.UncheckedIOException ex)
-        {
-            // Review L6: only a NETWORK failure of the configured CDISC Library may turn this
-            // case into a skip. Any other exception is a real failure and propagates.
-            java.io.IOException cause = ex.getCause();
-            if (!(cause instanceof java.net.ConnectException
-                    || cause instanceof java.net.UnknownHostException
-                    || cause instanceof java.net.SocketTimeoutException
-                    || cause instanceof java.net.http.HttpTimeoutException))
-            {
-                throw ex;
-            }
-            Assumptions.abort(
-                    "the CDISC Library was unreachable, so this case could not run: " + cause);
-            throw ex; // unreachable: abort() throws
-        }
+        int rc = OfflineCli.run(argv.toArray(new String[0]), cap.out, cap.err);
         assertEquals(0, rc, cap.errAsString());
         return cap;
     }

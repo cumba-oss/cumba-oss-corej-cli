@@ -239,6 +239,17 @@ class CdiscValidateRemoteTest
         assertTrue(res.err().contains("Note: --dictionaries-dir and the --<dictionary>-version"),
                 res.err());
         assertFalse(Files.exists(tmp.resolve("rt.csv")), "no runtime CSV is written remotely");
+
+        // Review round 2 L4: --dictionaries-dir ALONE (no --<dictionary>-version) trips the same
+        // Note — the condition's first arm, which the run above satisfies only through its second.
+        RunResult dirOnly = runCapturingErr("--remote", baseUrl(), "-d", data.toString(), "-o",
+                tmp.resolve("o2.json").toString(), "--dictionaries-dir", tmp.toString());
+        assertEquals(0, dirOnly.code());
+        assertTrue(
+                dirOnly.err().contains("Note: --dictionaries-dir and the --<dictionary>-version"),
+                dirOnly.err());
+        assertFalse(startBody.get().contains(tmp.toString()),
+                "the local dictionaries path must not travel to the server: " + startBody.get());
     }
 
 
@@ -679,8 +690,13 @@ class CdiscValidateRemoteTest
     }
 
 
+    /**
+     * PLAN-report-conformance-fields review round 2 L1: every {@code --rules-file} is uploaded and
+     * named in {@code rulesFilenames}, and the server loads each one — so the former Note claiming
+     * that only the first is uploaded was false and is gone.
+     */
     @Test
-    void multipleRulesFilesNoteWritten(@TempDir Path tmp) throws Exception
+    void multipleRulesFilesAreAllUploadedAndNamed(@TempDir Path tmp) throws Exception
     {
         Path data = studyDir(tmp, "dm.csv");
         Path r1 = tmp.resolve("r1.json");
@@ -695,7 +711,10 @@ class CdiscValidateRemoteTest
                 "-o", tmp.resolve("o.json").toString());
 
         assertEquals(0, res.code());
-        assertTrue(res.err().contains("uploads only the first --rules-file"), res.err());
+        assertTrue(startBody.get().contains("\"rulesFilenames\":[\"r1.json\",\"r2.json\"]"),
+                startBody.get());
+        assertFalse(res.err().contains("--rules-file"),
+                "no Note may claim that only one --rules-file is uploaded: " + res.err());
     }
 
 
