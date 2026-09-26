@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -467,72 +468,54 @@ class CdiscValidateTest
 
 
     /**
-     * Review round 2 (M-MP): the -mp pre-check reads the store the RUN resolves. An ambient
-     * old-format store (the property tier) beside an explicit -ca store of this format must not
-     * veto a full-form -mp key - the run reads -ca, and a full-form key needs no catalogue.
+     * Review round 2 (M-MP), made DISCRIMINATING in round 3 (L1): the {@code -mp} pre-check and the
+     * resolution read the store the RUN resolves ({@code -ca} first, then the ambient
+     * configuration), not {@code MetadataProductCatalogue.configured()}. The whole-invocation form
+     * of this test passed with the fix reverted, because {@code applyMetadataStoreConfiguration}
+     * publishes {@code -ca} into the very property tier the old call read - so this drives
+     * {@code resolveMetadataProducts} DIRECTLY, with the property tier pointing at an old-format
+     * store and {@code -ca} at a store of this format. Measured red with the two calls reverted to
+     * {@code configured()} / {@code resolveAllConfigured(tokens)} (§11.6).
      */
     @Test
-    void aFullFormProductKeyWithAnExplicitStore_isNotVetoedByAnAmbientOldStore() throws Exception
+    void resolveMetadataProducts_readsTheExplicitStoreNotTheAmbientOne() throws Exception
     {
-        Path source = makeSourceFolderWithCsv();
-        Path rulesDir = Files.createDirectory(tempDir.resolve("rules-" + System.nanoTime()));
-        Path rulesFile = rulesDir.resolve("rules-sdtmig-3-4.json");
-        Files.writeString(rulesFile, """
-                {
-                  "rules": {
-                    "u1": {
-                      "id": "u1",
-                      "Core": {"Id": "CORE-TEST-001"},
-                      "Sensitivity": "Record",
-                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
-                    }
-                  }
-                }
-                """);
-        writeCdiscManifest(rulesDir, rulesFile);
         Path explicit = CdiscValidateDefineXmlTest.store(tempDir);
         Path ambient = Files.copy(explicit, tempDir.resolve("ambient-old.zip"));
         CdiscValidateSeedCacheTest.relabelFormatVersion(ambient, 1);
-        String saved = System.getProperty(
-                net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY);
-        System.setProperty(
-                net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY,
-                ambient.toString());
+        String key = net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY;
+        String saved = System.getProperty(key);
+        System.setProperty(key, ambient.toString());
         try
         {
-            Path report = tempDir.resolve("mp-explicit.json");
-            Captured cap = capture();
-            int rc = OfflineCli.run(new String[]
+            CdiscValidate.Args withCa = CdiscValidate.Args.parse(new String[]
             {
-                    "-d", source.toString(), "-o", report.toString(), "-rp", "sdtmig-3-4", "-mp",
-                    "sdtmig/3-4", "--rules-dir", rulesDir.toString(), "-ca", explicit.toString()
-            }, cap.out, cap.err);
-            assertEquals(0, rc, cap.errAsString());
-            assertTrue(Files.exists(report), "the run reads the explicit store and completes");
-            assertFalse(cap.errAsString().contains("is format 1"), cap.errAsString());
+                    "-d", tempDir.toString(), "-mp", "3-4", "-ca", explicit.toString()
+            });
+            // A SHORT token against the explicit store: resolves there, and is not vetoed by
+            // the ambient old-format store (neither the pre-check nor the resolution reads it).
+            assertEquals(List.of("standards/sdtmig/3-4"),
+                    CdiscValidate.resolveMetadataProducts(withCa));
 
-            // The same run WITHOUT -ca reads the ambient store and aborts on its format.
-            Captured cap2 = capture();
-            int rc2 = OfflineCli.run(new String[]
+            // The same token with NO -ca reads the ambient store and names its format.
+            CdiscValidate.Args ambientOnly = CdiscValidate.Args.parse(new String[]
             {
-                    "-d", source.toString(), "-o", tempDir.resolve("mp-ambient.json").toString(),
-                    "-rp", "sdtmig-3-4", "-mp", "sdtmig/3-4", "--rules-dir", rulesDir.toString()
-            }, cap2.out, cap2.err);
-            assertEquals(2, rc2, cap2.errAsString());
-            assertTrue(cap2.errAsString().contains("is format 1"), cap2.errAsString());
+                    "-d", tempDir.toString(), "-mp", "3-4"
+            });
+            CdiscValidate.UsageException veto = assertThrows(CdiscValidate.UsageException.class,
+                    () -> CdiscValidate.resolveMetadataProducts(ambientOnly));
+            assertTrue(veto.getMessage().contains("is format 1"), veto.getMessage());
+            assertTrue(veto.getMessage().contains("--seed-cache"), veto.getMessage());
         }
         finally
         {
             if (saved == null)
             {
-                System.clearProperty(
-                        net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY);
+                System.clearProperty(key);
             }
             else
             {
-                System.setProperty(
-                        net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory.STORE_PROPERTY,
-                        saved);
+                System.setProperty(key, saved);
             }
         }
     }
@@ -810,8 +793,8 @@ class CdiscValidateTest
         Path source = pathToFolderWithCsv();
 
         Captured cap = capture();
-        java.io.IOException ex = org.junit.jupiter.api.Assertions
-                .assertThrows(java.io.IOException.class, () -> OfflineCli.run(new String[]
+        java.io.IOException ex = assertThrows(java.io.IOException.class,
+                () -> OfflineCli.run(new String[]
                 {
                         "-d", source.toString(), "-rd", tempDir.resolve("nope").toString(),
                         "--rules-dir", tempDir.toString(), "-o",
@@ -1202,8 +1185,8 @@ class CdiscValidateTest
         // under @TempDir; without it the CWD-relative default stem is used and the file is left
         // in the working directory (see WorkingDirectoryStaysCleanExtension).
         Captured cap = capture();
-        java.io.IOException ex = org.junit.jupiter.api.Assertions
-                .assertThrows(java.io.IOException.class, () -> OfflineCli.run(new String[]
+        java.io.IOException ex = assertThrows(java.io.IOException.class,
+                () -> OfflineCli.run(new String[]
                 {
                         "-d", "", "-o", tempDir.resolve("blank.json").toString()
                 }, cap.out, cap.err));

@@ -1720,7 +1720,7 @@ public final class CdiscValidate
      * {@code -s}/{@code -v} there is no implied default any more: a package that declares nothing
      * AND no {@code -mp} is refused by {@code StudyValidationService.runStandardOf}.
      */
-    private static List<String> resolveMetadataProducts(Args args)
+    static List<String> resolveMetadataProducts(Args args)
     {
         if (args.metadataProducts.stream().anyMatch(ProductKeyResolver::isShortForm))
         {
@@ -3334,7 +3334,7 @@ public final class CdiscValidate
     }
 
 
-    private static final class UsageException extends RuntimeException
+    static final class UsageException extends RuntimeException
     {
 
         private static final long serialVersionUID = 1L;
