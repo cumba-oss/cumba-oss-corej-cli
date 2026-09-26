@@ -28,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
  * Integration tests for {@link CdiscValidate}'s {@code --remote} mode against a stub REST server.
  */
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateRemoteTest
 {
 

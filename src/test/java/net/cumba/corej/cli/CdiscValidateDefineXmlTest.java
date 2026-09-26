@@ -33,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
  * </p>
  */
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateDefineXmlTest
 {
 
@@ -131,7 +132,8 @@ class CdiscValidateDefineXmlTest
                 "findings array present");
         assertTrue(root.has("ruleExecutions") && root.get("ruleExecutions").isArray(),
                 "ruleExecutions array present");
-        // No CT provider is bound (correctness-first), so CT-gated rules SKIP rather than fire.
+        // No store is named here (no -ca, none configured under target/test-home), so the CT
+        // and library rules SKIP; the store-bound cases are the N4 tests below.
         assertTrue(root.path("ruleExecutions").size() > 0, "at least one rule executed/skipped");
     }
 
@@ -269,7 +271,7 @@ class CdiscValidateDefineXmlTest
      * "Demographics", USUBJID Req) with its SDTM 2.0 model. Written by the production writer, so it
      * is a genuine current-format store.
      */
-    private static Path store(Path aDir) throws IOException
+    static Path store(Path aDir) throws IOException
     {
         net.cumba.corej.core.metadata.store.StoredCtPackage sdtm = new net.cumba.corej.core.metadata.store.StoredCtPackage(
                 "sdtmct-2024-03-29",
@@ -379,10 +381,8 @@ class CdiscValidateDefineXmlTest
     @Test
     void validateXml_withAStore_executesEveryLibraryRuleWithoutAnApiKey() throws Exception
     {
-        assertTrue(
-                System.getenv("CDISC_API_KEY") == null
-                        && System.getProperty("cdisc.library.api.key") == null,
-                "this case proves the store path needs no API key; unset it to run the suite");
+        // No API key is consulted anywhere on this path any more (T1-8 a): the case runs the same
+        // whether or not the machine has one configured (review round 1, M3).
         Path emptyData = Files.createDirectory(tempDir.resolve("data-lib"));
         Path define = Files.writeString(tempDir.resolve("define.xml"), LIBRARY_DEFINE,
                 StandardCharsets.UTF_8);
@@ -429,8 +429,7 @@ class CdiscValidateDefineXmlTest
         {
                 "-vx", "-d", emptyData.toString(), "-dxp", ctFixture().toString(), "-o",
                 tempDir.resolve("nostore.json").toString(), "--rules-dir", tempDir.toString(),
-                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
-                tempDir.resolve("no-such-store.zip").toString()
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA"
         }, cap);
 
         java.util.Map<String, JsonNode> executions = executionsById(
@@ -507,6 +506,65 @@ class CdiscValidateDefineXmlTest
         assertTrue(err.contains("declares controlled-terminology package 'sdtmct-1999-01-01'"),
                 err);
         assertTrue(err.contains("fill the CT Packages field"), "the escape hatch is named: " + err);
+        assertTrue(err.contains("-ct <id>"), "this surface's own hatch is named (M1): " + err);
+        assertTrue(err.contains("--seed-cache"), err);
+    }
+
+
+    /**
+     * L4 (review round 1): an OLD-FORMAT store ends the whole invocation - -vx AND the dataset run
+     * - with exit 2, nothing written, and the CLI's re-seed remedy (T1-10 a / m1).
+     */
+    @Test
+    void anOldFormatStore_abortsTheWholeInvocationNamingTheSeedCacheRemedy() throws Exception
+    {
+        Path data = Files.createDirectory(tempDir.resolve("data-old"));
+        Path old = store(tempDir);
+        CdiscValidateSeedCacheTest.relabelFormatVersion(old, 1);
+        Captured cap = new Captured();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-vx", "-d", data.toString(), "-dxp", ctFixture().toString(), "-o",
+                tempDir.resolve("old.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                old.toString()
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertFalse(Files.exists(tempDir.resolve("old.define.json")));
+        assertNoDatasetRun("old");
+        String err = cap.errAsString();
+        assertTrue(err.contains("is format 1"), err);
+        assertTrue(err.contains("must be re-seeded"), err);
+        assertTrue(err.contains("--seed-cache"), err);
+        assertTrue(!err.contains("--seed-overwrite"),
+                "an OLD store re-seeds with a plain --seed-cache (D-17, M4): " + err);
+        // The dataset run alone (no -vx) is the same abort: CdiscValidateTest
+        // .aDatasetRunOnAnOldFormatStore_abortsNamingTheSeedCacheRemedy.
+    }
+
+
+    /** L5 (review round 1): a store NAMED with -ca that does not exist is a usage error. */
+    @Test
+    void aMissingExplicitStore_isAUsageErrorNamingTheFile() throws Exception
+    {
+        Path data = Files.createDirectory(tempDir.resolve("data-noca"));
+        Path missing = tempDir.resolve("no-such-store.zip");
+        Captured cap = new Captured();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-vx", "-d", data.toString(), "-dxp", ctFixture().toString(), "-o",
+                tempDir.resolve("noca.json").toString(), "--rules-dir", tempDir.toString(),
+                "--define-rules-dir", bundledDefineRules(), "--define-family", "CDISC,PMDA", "-ca",
+                missing.toString()
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc);
+        assertFalse(Files.exists(tempDir.resolve("noca.define.json")));
+        String err = cap.errAsString();
+        assertTrue(err.contains("does not exist"), err);
+        assertTrue(err.contains(missing.toAbsolutePath().toString()), err);
+        assertTrue(!err.contains("no metadata store is configured"), err);
     }
 
 

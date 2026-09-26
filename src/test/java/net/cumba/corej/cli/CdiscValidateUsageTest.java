@@ -18,6 +18,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * error; both routes go through {@code printUsage}.
  */
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateUsageTest
 {
 

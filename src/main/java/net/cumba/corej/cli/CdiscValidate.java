@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import net.cumba.corej.core.CoreLibraryAccess;
+import net.cumba.corej.core.metadata.MetadataProductCatalogue;
 import net.cumba.corej.core.metadata.dictionary.DictionaryConverter;
 import net.cumba.corej.core.metadata.dictionary.DictionaryDirectoryResolver;
 import net.cumba.corej.core.metadata.dictionary.DictionaryInstaller;
@@ -39,6 +40,7 @@ import net.cumba.corej.core.metadata.pickle.HttpArchivePickleSource;
 import net.cumba.corej.core.metadata.pickle.LocalPickleSource;
 import net.cumba.corej.core.metadata.pickle.PickleSource;
 import net.cumba.corej.core.metadata.pickle.ProductKeyResolver;
+import net.cumba.corej.core.metadata.store.StoreFormatException;
 import net.cumba.corej.core.metadata.store.StoreMetadataProviderFactory;
 import net.cumba.corej.core.metadata.store.seed.PickleStoreSeeder;
 import net.cumba.corej.core.metadata.store.seed.StoreSeedOptions;
@@ -422,6 +424,19 @@ public final class CdiscValidate
             // -ca past an ambient CDISC_METADATA_STORE: toParams puts -ca on the params channel
             // (StudyValidationParams.metadataStore) for that. Restored afterwards so in-JVM
             // callers (tests foremost) see no global drift.
+            // D3 for the store itself (review round 1, L5): a store NAMED with -ca that does not
+            // exist aborts, naming the file — never a silent "no metadata store is configured".
+            // --seed-cache is the one mode whose -ca may not exist yet (it is the seed target).
+            boolean seeding = parsed.seedCache != null || parsed.seedCacheFromDir != null
+                    || parsed.seedCacheFromApi;
+            if (parsed.cache != null && !parsed.cache.isBlank() && !seeding
+                    && !Files.isRegularFile(Path.of(parsed.cache)))
+            {
+                err.println("Error: the metadata store given by -ca does not exist: "
+                        + Path.of(parsed.cache).toAbsolutePath()
+                        + ". Seed one there with --seed-cache, or name an existing store.");
+                return 2;
+            }
             Runnable restoreStore = applyMetadataStoreConfiguration(parsed.cache);
             try
             {
@@ -1698,6 +1713,19 @@ public final class CdiscValidate
      */
     private static List<String> resolveMetadataProducts(Args args)
     {
+        if (!args.metadataProducts.isEmpty())
+        {
+            // Review round 1 (engine L4): a short -mp key against an old-format store used to
+            // fail as "cannot be resolved: no product catalogue" — the store's format is the
+            // cause, and this surface's remedy is --seed-cache.
+            StoreFormatException oldFormat = MetadataProductCatalogue.configured()
+                    .storeFormatProblem();
+            if (oldFormat != null)
+            {
+                throw new UsageException(oldFormat.describe() + "." + storeRemedy(oldFormat),
+                        oldFormat);
+            }
+        }
         try
         {
             return ProductKeyResolver.resolveAllConfigured(args.metadataProducts);
@@ -2014,6 +2042,18 @@ public final class CdiscValidate
     }
 
 
+    /** This surface's remedy sentence for an old- or newer-format store (leading space). */
+    static String storeRemedy(StoreFormatException aProblem)
+    {
+        if (aProblem.writtenByNewerBuild())
+        {
+            return " Upgrade this tool, or replace the store with --seed-cache --seed-overwrite.";
+        }
+        return " Re-seed it with --seed-cache, or point -ca / CDISC_METADATA_STORE at a store of"
+                + " this format.";
+    }
+
+
     /**
      * The message of an operational abort, plus this surface's remedy when the cause is an
      * old-format metadata store (PLAN-define-ct-evaluation T1-10 m1: the core's message is neutral,
@@ -2022,10 +2062,16 @@ public final class CdiscValidate
     static String withStoreRemedy(StudyValidationException aFailure)
     {
         String message = aFailure.getMessage();
-        if (aFailure.getCause() instanceof net.cumba.corej.core.metadata.store.StoreFormatException)
+        if (aFailure.getCause() instanceof StoreFormatException e)
         {
-            return message + " Re-seed it with --seed-cache (add --seed-overwrite to replace the"
-                    + " old store), or point -ca / CDISC_METADATA_STORE at a store of this format.";
+            return message + storeRemedy(e);
+        }
+        if (message != null && message.contains(net.cumba.corej.core.run.CtPresence.CT_FIELD_HATCH))
+        {
+            // The engine's DEFINE-source abort names the data browser's field; on this surface
+            // the same hatch is -ct (review round 1, M1).
+            return message + " On the command line: -ct <id> (repeatable) replaces the define's"
+                    + " declaration, and --seed-cache seeds the store.";
         }
         return message != null ? message : aFailure.getClass().getSimpleName();
     }

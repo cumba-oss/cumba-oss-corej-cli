@@ -40,8 +40,9 @@ services:
     image: cumba-oss-corej-cli:local
     init: true
     environment:
-      # --- CDISC Library API key (optional; blank = Library enrichment skipped,
-      #     which can leave rules SKIPPED) ---
+      # --- CDISC Library API key (optional). Only --seed-cache-from-api uses it;
+      #     validation itself, -vx included, reads the metadata store and never
+      #     calls the Library, so a blank key skips nothing at run time. ---
       CDISC_API_KEY: "${CDISC_API_KEY:-}"
       # --- the rule corpus. ⭐ THE IMAGE SHIPS ONE (pinned and hash-verified at
       #     build time), and the entrypoint SEEDS it into ./corej-data/rules and

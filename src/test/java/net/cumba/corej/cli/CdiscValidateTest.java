@@ -30,6 +30,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 // Reflective bridge in test infrastructure; RuntimeException is the correct wrapping.
 @SuppressWarnings("RethrowReflectiveOperationExceptionAsLinkageError")
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateTest
 {
 
@@ -413,6 +414,58 @@ class CdiscValidateTest
     }
 
 
+    /**
+     * PLAN-define-ct-evaluation T1-10 (a), review round 1 L4: a dataset run (no {@code -vx})
+     * against an OLD-FORMAT store aborts before any rule runs — exit 2, no report — naming the
+     * store's format and this surface's remedy ({@code --seed-cache}, without
+     * {@code --seed-overwrite}, which an old store does not need).
+     */
+    @Test
+    void aDatasetRunOnAnOldFormatStore_abortsNamingTheSeedCacheRemedy() throws Exception
+    {
+        Path source = makeSourceFolderWithCsv();
+        Path rulesDir = Files.createDirectory(tempDir.resolve("rules-" + System.nanoTime()));
+        Path rulesFile = rulesDir.resolve("rules-sdtmig-3-4.json");
+        Files.writeString(rulesFile, """
+                {
+                  "rules": {
+                    "u1": {
+                      "id": "u1",
+                      "Core": {"Id": "CORE-TEST-001"},
+                      "Sensitivity": "Record",
+                      "Check": {"expression": "var_exists(\\"USUBJID\\")"}
+                    }
+                  }
+                }
+                """);
+        // The package DECLARES its standard, so the run has a product to resolve against the
+        // store and reaches the store itself (no -mp: that path has its own abort, engine L4).
+        new net.cumba.corej.core.RulePackageManifest("test",
+                List.of(new net.cumba.corej.core.RulePackageManifest.Entry(
+                        rulesFile.getFileName().toString(), "CDISC", "sdtmig", "3-4", 1,
+                        List.of(new net.cumba.corej.core.model.StandardRef("sdtmig/3-4",
+                                net.cumba.corej.core.model.StandardRef.Role.PRIMARY)))))
+                                        .writeTo(rulesDir);
+        Path old = CdiscValidateDefineXmlTest.store(tempDir);
+        CdiscValidateSeedCacheTest.relabelFormatVersion(old, 1);
+        Path report = tempDir.resolve("old-store.json");
+
+        Captured cap = capture();
+        int rc = OfflineCli.run(new String[]
+        {
+                "-d", source.toString(), "-o", report.toString(), "-rp", "sdtmig-3-4",
+                "--rules-dir", rulesDir.toString(), "-ca", old.toString()
+        }, cap.out, cap.err);
+
+        assertEquals(2, rc, cap.errAsString());
+        assertFalse(Files.exists(report), "no report is written for an aborted run");
+        String err = cap.errAsString();
+        assertTrue(err.contains("is format 1"), err);
+        assertTrue(err.contains("--seed-cache"), err);
+        assertFalse(err.contains("--seed-overwrite"), err);
+    }
+
+
     @Test
     void run_endToEnd_minimalRulePackage_writesReportAndRuntimeCsv() throws Exception
     {
@@ -595,10 +648,12 @@ class CdiscValidateTest
      *
      * <p>
      * Review rounds 2 and 3 (L2, D1): there is no network-only skip here, nor in any other case of
-     * this class. The CDISC Library is consulted only by {@code -vx} (Define-XML conformance),
-     * which no case here passes, and {@link OfflineCli} denies the dictionary and pickle-archive
-     * downloads; an expected failure is an exit code, not an exception. A skip-on-exception branch
-     * could therefore only have hidden a real engine failure as a SKIP.
+     * this class. No validation run consults the CDISC Library any more — since
+     * PLAN-define-ct-evaluation (T1-8 a) {@code -vx} reads the metadata store like every other
+     * check, and only {@code --seed-cache-from-api} calls the Library — and {@link OfflineCli}
+     * denies the dictionary and pickle-archive downloads; an expected failure is an exit code, not
+     * an exception. A skip-on-exception branch could therefore only have hidden a real engine
+     * failure as a SKIP.
      * </p>
      */
     private Captured runOffline(Path source, Path rulesDir, String name, String... extra)

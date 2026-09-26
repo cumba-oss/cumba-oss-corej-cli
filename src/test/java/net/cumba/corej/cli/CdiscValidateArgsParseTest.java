@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
  * reflection (it returns the populated {@code Args}, letting us assert the parsed thread count
  * directly — which is what kills the boundary mutant on {@code ruleThreads < 1}).
  */
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateArgsParseTest
 {
 

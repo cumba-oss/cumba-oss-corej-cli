@@ -10,9 +10,13 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 import net.cumba.corej.core.metadata.store.MetadataStore;
 import net.razorvine.pickle.Pickler;
 import org.junit.jupiter.api.Test;
@@ -30,6 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
  * </p>
  */
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateSeedCacheTest
 {
 
@@ -246,6 +251,104 @@ class CdiscValidateSeedCacheTest
         assertTrue(run.err().contains("Metadata store seeding (dry run) at " + store + ":"),
                 run.err());
         assertFalse(run.err().contains("Metadata store seeded at "), run.err());
+    }
+
+
+    /**
+     * M4 (review round 1) / D-17: re-seeding over an OLDER-format store is the expected upgrade
+     * path, so it must exit 0 with a plain --seed-cache; a NEWER-format store (engine L1) is
+     * refused with exit 1 naming --seed-overwrite, and --seed-overwrite then replaces it.
+     */
+    @Test
+    void reseedingAnOldStoreExitsZeroAndANewerStoreIsRefusedUntilOverwrite(@TempDir Path root)
+        throws Exception
+    {
+        Path store = root.resolve("metadata-cache.zip");
+        Run first = invoke("--seed-cache-from-dir", pickleDir(root).toString(), "-ca",
+                store.toString());
+        assertEquals(0, first.exitCode(), first.err());
+        int current;
+        try (MetadataStore s = MetadataStore.open(store))
+        {
+            current = s.manifest().formatVersion();
+        }
+
+        relabelFormatVersion(store, 1);
+        Run old = invoke("--seed-cache-from-dir", pickleDir(root).toString(), "-ca",
+                store.toString());
+        assertEquals(0, old.exitCode(), "an old store re-seeds cleanly: " + old.err());
+        assertTrue(!old.err().contains("warning:"), old.err());
+        try (MetadataStore s = MetadataStore.open(store))
+        {
+            assertEquals(current, s.manifest().formatVersion());
+        }
+
+        relabelFormatVersion(store, current + 1);
+        Run newer = invoke("--seed-cache-from-dir", pickleDir(root).toString(), "-ca",
+                store.toString());
+        assertEquals(1, newer.exitCode(), newer.err());
+        assertTrue(newer.err().contains("newer build"), newer.err());
+        assertTrue(newer.err().contains("--seed-overwrite"), newer.err());
+
+        Run replaced = invoke("--seed-cache-from-dir", pickleDir(root).toString(), "-ca",
+                store.toString(), "--seed-overwrite");
+        assertEquals(0, replaced.exitCode(), replaced.err());
+    }
+
+
+    /**
+     * Engine L4 (review round 1): a short {@code -mp} key against an OLD-FORMAT store is refused
+     * naming the store's format and this surface's remedy — not "cannot be resolved: no product
+     * catalogue", which is what "no store configured" looks like.
+     */
+    @Test
+    void aShortProductKeyAgainstAnOldFormatStoreNamesTheFormatProblem(@TempDir Path root)
+        throws Exception
+    {
+        Path store = root.resolve("metadata-cache.zip");
+        Run seeded = invoke("--seed-cache-from-dir", pickleDir(root).toString(), "-ca",
+                store.toString());
+        assertEquals(0, seeded.exitCode(), seeded.err());
+        relabelFormatVersion(store, 1);
+        Path data = Files.createDirectory(root.resolve("data"));
+
+        Run run = invoke("-d", data.toString(), "-mp", "sdtmig/3-4", "-ca", store.toString(), "-o",
+                root.resolve("mp.json").toString(), "--rules-dir", root.toString());
+
+        assertEquals(2, run.exitCode(), run.err());
+        assertTrue(run.err().contains("is format 1"), run.err());
+        assertTrue(run.err().contains("--seed-cache"), run.err());
+        assertTrue(!run.err().contains("cannot be resolved"), run.err());
+    }
+
+
+    /** The relabel trick the store tests use: rewrite the manifest's formatVersion in place. */
+    static void relabelFormatVersion(Path aStore, int aVersion) throws IOException
+    {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        try (ZipFile zip = new ZipFile(aStore.toFile()))
+        {
+            Enumeration<? extends ZipEntry> names = zip.entries();
+            while (names.hasMoreElements())
+            {
+                ZipEntry entry = names.nextElement();
+                entries.put(entry.getName(), zip.getInputStream(entry).readAllBytes());
+            }
+        }
+        String manifest = new String(entries.get("manifest.json"), StandardCharsets.UTF_8);
+        String relabelled = manifest.replaceFirst("\"formatVersion\" : \\d+",
+                "\"formatVersion\" : " + aVersion);
+        assertTrue(!relabelled.equals(manifest), "the relabel must change the manifest");
+        entries.put("manifest.json", relabelled.getBytes(StandardCharsets.UTF_8));
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(aStore)))
+        {
+            for (Map.Entry<String, byte[]> entry : entries.entrySet())
+            {
+                zip.putNextEntry(new ZipEntry(entry.getKey()));
+                zip.write(entry.getValue());
+                zip.closeEntry();
+            }
+        }
     }
 
 

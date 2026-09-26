@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Test;
 // Two cases here drive CdiscValidate.run(...) for real; the CLI's own defaults are CWD-relative,
 // so this class needs the same working-directory guard as every other end-to-end class.
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateHelpersTest
 {
 

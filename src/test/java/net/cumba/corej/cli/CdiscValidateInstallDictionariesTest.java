@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
  * </p>
  */
 @org.junit.jupiter.api.extension.ExtendWith(WorkingDirectoryStaysCleanExtension.class)
+@org.junit.jupiter.api.extension.ExtendWith(HomeStaysCleanExtension.class)
 class CdiscValidateInstallDictionariesTest
 {
 

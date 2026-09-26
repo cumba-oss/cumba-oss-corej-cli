@@ -158,15 +158,14 @@ ENV COREJ_DICTIONARIES_DIR=/app/dictionaries
 ENV CDISC_METADATA_STORE=/app/metadata/metadata-cache.zip
 
 # The CDISC Library web-API cache — a DIRECTORY of cached HTTP responses. ⚠ It is
-# NOT the metadata store above and `--seed-cache` does not fill it: since the
-# engine's pickle read leg was retired, the only path that reads this cache is the
-# Define-XML conformance run (`-vx` in local mode), which calls the live CDISC
-# Library and caches the responses here.
+# NOT the metadata store above: the only path that reads it is
+# `--seed-cache-from-api`, whose CDISC Library client caches its responses here.
+# No validation run (`-vx` included) calls the Library any more.
 # ⚠⚠ Without this ENV the client's own default applies, ~/.cdiscApiCache, which
 # with --home-dir /app resolves to /app/.cdiscApiCache — an IMAGE-LAYER path in a
-# container that runs once and exits, so every `-vx` run would re-fetch from the
+# container that runs once and exits, so every API seed would re-fetch from the
 # network. Mount it to keep it:
-#   docker run --rm -v corej-api-cache:/app/api-cache <image> -vx …
+#   docker run --rm -v corej-api-cache:/app/api-cache <image> --seed-cache-from-api …
 ENV CDISC_API_CACHE=/app/api-cache
 
 # /data is the conventional mount point for the study under validation and for the

@@ -319,9 +319,10 @@ SKIPs — loudly, by name. Three seeding modes build it, each running standalone
 `--seed-overwrite` re-acquires everything instead of carrying forward what the store already
 holds; `--seed-dry-run` reports what a run would change without touching it.
 
-⚠ `CDISC_API_CACHE` is a different thing and is **not** the store: it is an HTTP response cache
-for the Define-XML conformance run (`-vx` in local mode), the one path that still calls the
-Library directly.
+⚠ `CDISC_API_CACHE` is a different thing and is **not** the store: it is the HTTP response cache
+of the CDISC Library client, and the only path that reads it is `--seed-cache-from-api`. No
+validation run calls the Library any more — `-vx` reads its CT and Library metadata from the
+store like every other check.
 
 `--install-dictionaries` populates the dictionary store and exits; with no inputs it downloads the
 credential-free MED-RT, UNII and neoplasm sets. It is a local maintenance mode and is rejected in

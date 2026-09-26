@@ -137,10 +137,10 @@ fi
 # ------------------------------------------------------------------
 # The CDISC Library web-API cache.
 #
-# ⚠ NOT the metadata store above. Since the engine's pickle read leg was retired
-# the only path that reads this directory is a Define-XML conformance run (-vx in
-# local mode), which calls the live CDISC Library and caches the responses here;
-# --seed-cache does not fill it and -ca does not name it.
+# ⚠ NOT the metadata store above. The only path that reads this directory is
+# --seed-cache-from-api, whose CDISC Library client caches its HTTP responses
+# here; no validation run (-vx included) calls the Library any more, and -ca does
+# not name it.
 #
 # The Dockerfile sets CDISC_API_CACHE to /app/api-cache so it lands on a directory
 # an operator can mount, NOT on the client's own default ~/.cdiscApiCache — which,
@@ -153,7 +153,7 @@ API_CACHE="${CDISC_API_CACHE:-/app/api-cache}"
 export CDISC_API_CACHE="$API_CACHE"
 if mkdir -p "$API_CACHE" 2>/dev/null; then :; else
     echo "warning: cannot create $API_CACHE for the CDISC Library API cache;" \
-        "a -vx run will re-fetch every Library response it needs from the network" >&2
+        "--seed-cache-from-api will re-fetch every Library response from the network" >&2
 fi
 
 # ------------------------------------------------------------------
