@@ -728,7 +728,7 @@ class CdiscValidateHelpersTest
     void withStoreRemedy_appendsTheSeedCacheRemedyOnlyForAnOldFormatStore()
     {
         net.cumba.corej.core.metadata.store.StoreFormatException cause = new net.cumba.corej.core.metadata.store.StoreFormatException(
-                Path.of("old.zip"), 2, 3);
+                Path.of("old.zip"), 3, 4);
         String withRemedy = CdiscValidate.withStoreRemedy(
                 new net.cumba.corej.core.run.StudyValidationException(cause.describe(), cause));
         assertTrue(withRemedy.startsWith(cause.describe()), withRemedy);

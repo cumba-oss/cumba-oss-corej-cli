@@ -320,9 +320,10 @@ SKIPs — loudly, by name. Three seeding modes build it, each running standalone
 `--seed-overwrite` re-acquires everything instead of carrying forward what the store already
 holds; `--seed-dry-run` reports what a run would change without touching it.
 
-⚠ **Store format 3 (2026-09-26).** A store seeded before it (format 2) is refused — every run on it
-exits 2 naming the file and `--seed-cache` — never read with the new fields empty; re-seed once with
-a plain `--seed-cache`. A store written by a NEWER build than this tool is refused the other way
+⚠ **Store format 4 (2026-09-28).** A store seeded before it (format 3, or format 2 from a release
+before 2026-09-26) is refused — every run on it exits 2 naming the file and `--seed-cache` — never
+read with the new fields empty (format 4 added the CDASH fields' codelist C-codes); re-seed once
+with a plain `--seed-cache`. A store written by a NEWER build than this tool is refused the other way
 round (*"upgrade this tool"*): `--seed-cache` leaves it alone unless `--seed-overwrite` is passed.
 
 ⚠ `CDISC_API_CACHE` is a different thing and is **not** the store: it is the HTTP response cache
