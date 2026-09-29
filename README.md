@@ -27,9 +27,9 @@ The libraries this client consumes *are* on Central, released separately on thei
 
 | Library | Version pinned here |
 |---|---|
-| `cumba-oss-commons` | `0.2.1` |
-| `cumba-oss-datatable` | `0.2.0` |
-| `cumba-oss-corej` | `0.3.0` |
+| `cumba-oss-commons` | `0.5.0-SNAPSHOT` |
+| `cumba-oss-datatable` | `0.5.0-SNAPSHOT` |
+| `cumba-oss-corej` | `0.6.0-SNAPSHOT` |
 
 (the `dependency.cumba-oss-*.version` properties in `pom.xml`).
 
@@ -52,11 +52,10 @@ The two releases are cut independently from the same tag by
 `.github/workflows/ci.yml` and `.gitea/workflows/main.yml`; the Gitea run additionally deploys to
 the internal Nexus. Nothing reaches Maven Central.
 
-⚠ **This repository has never cut a tag.** `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` are
-**organisation-level** secrets on `cumba-oss`, so they are inherited here rather than set per
-repository — but the signing path itself has never run in this repo, so the first tag is its
-first real test. The release job fails by name on an empty key rather than publishing unsigned
-assets.
+⚠ `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` are **organisation-level** secrets on `cumba-oss`, so
+they are inherited here rather than set per repository. The signing path has run for both tags cut
+so far, `v0.1.0` and `v0.2.0`: each GitHub release carries a `.asc` beside its zip and its jar. The
+release job fails by name on an empty key rather than publishing unsigned assets.
 
 ### Verifying a release asset
 
@@ -134,7 +133,7 @@ cumba-oss-corej-cli-<version>/
 ├── cumba-oss-corej-cli.jar     the cumba-oss-bootstrap launcher
 ├── cumba-oss-corej-cli.conf    its configuration — edit freely, no rebuild
 ├── run.sh   run.bat
-├── rules/                      the pinned rule corpus (47 packages)
+├── rules/                      the pinned rule corpus (32 packages)
 ├── rules-define/               the pinned Define-XML corpus (4 packages)
 ├── dictionaries/               empty; ./run.sh installs into it
 └── lib/                        the application jar and every dependency
@@ -243,8 +242,8 @@ then acquire the **same corpus the same way**, and answer identically for the sa
 
 ⚠ The bundled corpus has **no CORE rule family** (externally sourced, not redistributable as a set)
 and therefore **no TIG coverage** — `rules-draft-tig-1-0` is the only TIG package outside CORE, and
-it is a DRAFT. Release `v0.3.1` does ship all 15 `rules-draft-*` packages: parked candidates, never
-selected for you, and not a basis for a submission. See `src/main/dist/rules/README.md`.
+it is a DRAFT. The pinned release `v0.4.0` ships no `rules-draft-*` package: the DRAFT family is
+generated and tested in the corpus repo but not released. See `src/main/dist/rules/README.md`.
 
 ⚠⚠ **Bumping the corpus is a five-repo change** — this repo, `cumba-oss-corej-rest`, their two
 internal twins and `cumba-databrowser` all pin `dependency.corej-rules.tag` and the two hashes,
@@ -264,11 +263,11 @@ download and the zip — because the fileSets that join them point **through a v
 directory** (`cumba-oss-corej-rules-<version>/rules/`), and a wrong path there stages nothing at
 all, silently, with every gate green.
 
-⚠ The draft assertion is an **exact equality, and the number is not 0**: `v0.3.1` still ships all
-15 DRAFT packages. `build_distribution.sh`'s `MAX_DRAFT_PKGS=0` is a different subject — the data
-browser's staged platform archives — and is a deliberate blocker awaiting the DRAFT-free tag.
-Equality here means that tag bump turns this build red and forces the number to 0 in the same edit,
-rather than passing silently.
+⚠ The draft assertion is an **exact equality**, and since the pin moved to the DRAFT-free `v0.4.0`
+the number is 0. `build_distribution.sh`'s `MAX_DRAFT_PKGS=0` is a different subject — the data
+browser's staged platform archives. Equality here means a tag bump that changes the release scope
+turns this build red and forces the number to be re-measured in the same edit, rather than passing
+silently.
 
 ### Pointing the engine somewhere else
 
