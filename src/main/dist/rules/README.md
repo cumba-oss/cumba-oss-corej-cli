@@ -20,7 +20,7 @@ which is the public corpus. Two things to know about its scope:
 - **No CORE rule family.** Those rules are externally sourced and may not be redistributed as a
   set, so no cumba bundle ships them — the internal CLI and REST bundles pin this same public
   release for exactly that reason. Everything else is here.
-- **No DRAFT family.** Release `v0.4.0` ships 32 packages, none of them `rules-draft-*`. The
+- **No DRAFT family.** Release `v0.5.0` ships 32 packages, none of them `rules-draft-*`. The
   DRAFT rules are **parked candidate rules**: fully generated, schema-validated and executed by
   their test scenarios upstream, but not promoted, and the published archive leaves them out
   (`rules-draft-tig-1-0` is the only TIG package outside the CORE family, so TIG coverage went
@@ -33,7 +33,7 @@ Two ways. Neither requires rebuilding the bundle.
 **Point at another directory** — nothing is copied, and the bundle stays as shipped:
 
 ```sh
-COREJ_RULES_DIR=/srv/corej/rules-0.4.0 ./run.sh -d /study ...
+COREJ_RULES_DIR=/srv/corej/rules-0.5.0 ./run.sh -d /study ...
 ```
 
 `COREJ_RULES_DIR` outranks the `-Dcorej.rules.dir` system property, which outranks this directory —

@@ -242,7 +242,7 @@ then acquire the **same corpus the same way**, and answer identically for the sa
 
 ⚠ The bundled corpus has **no CORE rule family** (externally sourced, not redistributable as a set)
 and therefore **no TIG coverage** — `rules-draft-tig-1-0` is the only TIG package outside CORE, and
-it is a DRAFT. The pinned release `v0.4.0` ships no `rules-draft-*` package: the DRAFT family is
+it is a DRAFT. The pinned release `v0.5.0` ships no `rules-draft-*` package: the DRAFT family is
 generated and tested in the corpus repo but not released. See `src/main/dist/rules/README.md`.
 
 ⚠⚠ **Bumping the corpus is a five-repo change** — this repo, `cumba-oss-corej-rest`, their two

@@ -26,7 +26,7 @@ pre-pass — knows which version the document is, and therefore which package to
 ## Replacing it with a different corpus version
 
 ```sh
-COREJ_DEFINE_RULES_DIR=/srv/corej/rules-define-0.4.0 ./run.sh -vx ...
+COREJ_DEFINE_RULES_DIR=/srv/corej/rules-define-0.5.0 ./run.sh -vx ...
 ```
 
 (`COREJ_DEFINE_RULES_DIR` overrides the bundle default configured in `cumba-oss-corej-cli.conf`.)
