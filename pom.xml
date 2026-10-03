@@ -1936,30 +1936,6 @@
     </dependencies>
 
     <build>
-        <!--
-            Filter ONLY version.properties so each module's
-            src/main/resources/version.properties gets ${project.version}
-            and the git.* values substituted at build time. Every other
-            resource (rule JSON, schemas, binaries) is copied verbatim by
-            the first, unfiltered resource entry. Restricting filtering to
-            this one file avoids mangling placeholder-bearing resources.
-        -->
-        <resources>
-            <resource>
-                <directory>src/main/resources</directory>
-                <excludes>
-                    <exclude>version.properties</exclude>
-                </excludes>
-            </resource>
-            <resource>
-                <directory>src/main/resources</directory>
-                <filtering>true</filtering>
-                <includes>
-                    <include>version.properties</include>
-                </includes>
-            </resource>
-        </resources>
-
         <pluginManagement>
             <plugins>
 
