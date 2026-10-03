@@ -15,16 +15,15 @@ of date, not this one.
 ## What is in it, and what is not
 
 The corpus comes from [`cumba-oss-corej-rules`](https://github.com/cumba-oss/cumba-oss-corej-rules),
-which is the public corpus. Two things to know about its scope:
+which is the public corpus. Three things to know about its scope:
 
 - **No CORE rule family.** Those rules are externally sourced and may not be redistributed as a
-  set, so no cumba bundle ships them — the internal CLI and REST bundles pin this same public
-  release for exactly that reason. Everything else is here.
-- **No DRAFT family.** Release `v0.5.0` ships 32 packages, none of them `rules-draft-*`. The
-  DRAFT rules are **parked candidate rules**: fully generated, schema-validated and executed by
-  their test scenarios upstream, but not promoted, and the published archive leaves them out
-  (`rules-draft-tig-1-0` is the only TIG package outside the CORE family, so TIG coverage went
-  with them).
+  set, so no cumba corpus carries them and no cumba bundle ships them. Everything else is here.
+- **No DRAFT family.** The published archive carries no `rules-draft-*` package. The DRAFT rules
+  are parked candidate rules: fully generated, schema-validated and executed by their test
+  scenarios upstream, but not promoted.
+- **No TIG coverage.** `rules-draft-tig-1-0` is the only TIG package in the corpus, so TIG
+  conformance travelled with the DRAFT family and is not offered. Accepted, not a defect.
 
 ## Replacing it with a different corpus version
 
@@ -37,7 +36,7 @@ COREJ_RULES_DIR=/srv/corej/rules-0.5.0 ./run.sh -d /study ...
 ```
 
 `COREJ_RULES_DIR` outranks the `-Dcorej.rules.dir` system property, which outranks this directory —
-the precedence `cumba-oss-corej-cli.conf` beside the launcher configures.
+the precedence the launcher's sidecar `.conf` configures.
 
 **Or replace the contents in place**, from a `cumba-oss-corej-rules` release:
 
@@ -53,6 +52,10 @@ contents, as above.
 
 ⚠ Delete the old `rules-*.json` first. The engine reads whatever packages are present, so leftovers
 from the previous corpus stay selectable and silently mix two versions.
+
+⚠ In the container image the entrypoint **seeds** the bundled corpus onto the configured rules
+directory only if that directory holds no `packages.json` of its own, so a corpus you unpack there
+is never overwritten.
 
 ⚠ **Do not delete this directory** even if you point `COREJ_RULES_DIR` elsewhere. Its README is
 harmless, and an empty `rules/` is fine — but see `rules-define/README.md` beside it, where a

@@ -29,7 +29,7 @@ pre-pass — knows which version the document is, and therefore which package to
 COREJ_DEFINE_RULES_DIR=/srv/corej/rules-define-0.5.0 ./run.sh -vx ...
 ```
 
-(`COREJ_DEFINE_RULES_DIR` overrides the bundle default configured in `cumba-oss-corej-cli.conf`.)
+(`COREJ_DEFINE_RULES_DIR` overrides the bundle default configured in the launcher's sidecar `.conf`.)
 
 or, in place, from the release's **second** asset — `cumba-oss-corej-rules-define-<version>.zip` is
 a separate archive from the data corpus:

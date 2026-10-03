@@ -23,7 +23,6 @@ import net.cumba.datatable.DataTableMeta;
 import net.cumba.datatable.IDataTable;
 import net.cumba.datatable.impl.provider.DataTableProviderFactory;
 import net.cumba.datatable.io.FileInfo;
-import net.cumba.datatable.metadata.IMetadataLibrary;
 import net.cumba.datatable.provider.csv.CsvProviderSupplier;
 import net.cumba.datatable.provider.csv.CsvTableProvider;
 import net.cumba.datatable.values.DataValueType;
@@ -428,10 +427,7 @@ class BlankCellFormatIndependenceTest
 
     private static IDataTable loadViaFactory(Path aFile) throws IOException
     {
-        // The 3-arg provide() is overloaded on the last parameter; the metadata-library overload is
-        // the extension-dispatching one used by the study loader.
-        IDataTable table = DataTableProviderFactory.getFactory().provide(aFile.toUri(), null,
-                (IMetadataLibrary) null);
+        IDataTable table = DataTableProviderFactory.getFactory().provide(aFile.toUri(), null);
         assertNotNull(table, "no provider resolved for " + aFile);
         return table;
     }
