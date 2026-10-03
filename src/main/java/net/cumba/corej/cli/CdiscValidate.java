@@ -1139,6 +1139,12 @@ public final class CdiscValidate
                 LOGGER.log(System.Logger.Level.WARNING, "  {0}", warning);
                 aErr.println("  warning: " + warning);
             }
+            // The per-entry detail (stale errata with their reasons): the summary only counts
+            // them, so the ids reach the operator here. Not warnings — they leave the exit code.
+            for (String detail : report.details())
+            {
+                aErr.println("  detail: " + detail);
+            }
             boolean nothingSeeded = report.productsSeeded() + report.productsCarried() == 0
                     && report.ctPackagesFetched() + report.ctPackagesCarried() == 0;
             if (nothingSeeded)
