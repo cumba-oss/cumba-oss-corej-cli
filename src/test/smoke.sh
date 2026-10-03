@@ -55,11 +55,24 @@
 # definitionally invalid — an undeclared `&NAME&` token, a forward binding reference,
 # an unknown key — onto the rule as a RECORDED load error and keeps going: the
 # package loads, the run completes, the exit code is 0, and the rule surfaces only in
-# the report, as one `"status":"EXECUTION_ERROR"` row per dataset. Every arm above is
-# blind to that, so a corpus with dead rules printed `smoke: OK`. So each executed
-# package's report is read too, and ANY EXECUTION_ERROR row is fatal. That also
-# catches a rule that fails at RUN time, which on this one-row dataset is just as
-# much a defect — measured on the published corpus: zero EXECUTION_ERROR rows.
+# the report, as its Rules_Report row (one row per rule) with
+# `"status":"EXECUTION_ERROR"`. Every arm above is blind to that, so a corpus with dead
+# rules printed `smoke: OK`. So the report of every run that exits 0 is read too, and
+# ANY EXECUTION_ERROR row is fatal. That also catches a rule that fails at RUN time,
+# which on this one-row dataset is just as much a defect — measured on the published
+# corpus: zero EXECUTION_ERROR rows.
+#
+# ⚠ THE REPORT IS KEYED ON THE EXIT CODE, NOT ON THE LOG LINE (2026-10-03, review
+# lane 4). Exit 0 means the CLI wrote the report it was asked for, so a missing report
+# after exit 0 is fatal whether or not "Validation complete:" was logged — reading it
+# only after that line would let a run that exits 0 without it skip the check.
+#
+# ⛔ EVERY PACKAGE IS ACCOUNTED FOR. A package ends in exactly one of two modelled
+# states: it EXECUTED (exit 0 and "Validation complete:"), or it was REFUSED with one
+# of the two named selection refusals (exit 2). Everything else is fatal on the spot,
+# so `executed + refused == npkg` is asserted after the loop, and the refused packages
+# are printed by name — a refusal is a package whose rules did NOT run, and the
+# operator must be able to see which ones.
 #
 # ⚠ THE EXIT CODE IS THE DISCRIMINATOR, and it must not be read alone. An unloadable
 # package is an UNCAUGHT exception (exit 1, RuleDefinitionException/JsonMappingException
@@ -132,7 +145,9 @@ set -euo pipefail
 # ⚠ grep/sed/find/mkdir were added on 2026-09-17 with the new probe 1, which reads
 # the bundle's packages.json and builds a data library. find was already used by the
 # corpus floor below and had been missed here.
-for tool in find grep java ls mkdir mktemp printf rm sed wc; do
+# ⚠ tr was added on 2026-10-03: the EXECUTION_ERROR message extraction flattens the
+# report onto one line first, so a pretty-printed report yields the message too.
+for tool in find grep java ls mkdir mktemp printf rm sed tr wc; do
     command -v "$tool" >/dev/null 2>&1 \
         || { echo "smoke: required tool not found: $tool" >&2; exit 1; }
 done
@@ -260,6 +275,9 @@ explain_load_failure() {
 bad=""
 nbad=0
 executed=0
+refused=""
+nrefused=0
+stalled=""
 loadedfrom=""
 recorded=""
 nrecorded=0
@@ -310,43 +328,52 @@ smoke:   rules-$p.json: $(explain_load_failure "$out")"
     # INTENDED refusal messages here exactly as the REST probe does.
     if [ "$rc" -eq 2 ]; then
         case "$out" in
-            *'declare more than one TIG leg'*|*'declare no CDISC Library standard'*) ;;
+            *'declare more than one TIG leg'*|*'declare no CDISC Library standard'*)
+                refused="$refused
+smoke:   rules-$p.json: $(printf '%s\n' "$out" | grep -m1 '^Error: ' || printf 'no Error: line in the output')"
+                nrefused=$((nrefused + 1)) ;;
             *)
                 fail "rule package '$p' exited 2, but with neither of the two selection refusals this probe models (a multi-leg TIG package; a package declaring no CDISC Library standard). Exit 2 is EVERY StudyValidationException — R-8's corpus fault included — so this is an unmodelled failure, not a refusal: $(printf '%s\n' "$out" | grep -m1 '^Error: ' || printf 'no Error: line in the output')" ;;
         esac
     fi
 
-    case "$out" in
-        *"Validation complete:"*)
-            executed=$((executed + 1))
-            # ⛔ THE RECORDED LOAD ERROR. See the ⛔ note in the header: a rule the engine
-            # could not load is reported, never thrown, so only the report shows it.
-            [ -s "$work/report.json" ] \
-                || fail "rule package '$p' completed but wrote no report to $work/report.json"
-            report="$(< "$work/report.json")"
-            # ⚠ NON-VACUITY, per report: the rows this arm reads must be there in the
-            # shape it reads them, or a renamed key would turn it into a no-op.
-            case "$report" in
-                *'"Rules_Report"'*) ;;
-                *) fail "the report for rule package '$p' has no Rules_Report — its shape changed, and the recorded-load-error check would have read nothing" ;;
-            esac
-            n="$(printf '%s' "$report" \
-                    | grep -oE '"status"[[:space:]]*:[[:space:]]*"[A-Z_]+"' | wc -l)" || true
-            nrows=$((nrows + n))
-            n="$(printf '%s' "$report" \
-                    | grep -oE '"status"[[:space:]]*:[[:space:]]*"EXECUTION_ERROR"' | wc -l)" || true
-            if [ "$n" -gt 0 ]; then
-                # The row's message precedes its status; a load error's message opens
-                # with the rule id in brackets, so the first one names rule and cause.
-                why="$(printf '%s' "$report" \
-                        | grep -oE '"message"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"[[:space:]]*,[[:space:]]*"status"[[:space:]]*:[[:space:]]*"EXECUTION_ERROR"' \
-                        | head -1 \
-                        | sed -E 's/^"message"[[:space:]]*:[[:space:]]*"//; s/"[[:space:]]*,[[:space:]]*"status".*$//')" || true
-                recorded="$recorded
-smoke:   rules-$p.json: $n EXECUTION_ERROR row(s), first: ${why:-no message on the row}"
-                nrecorded=$((nrecorded + 1))
-            fi ;;
-    esac
+    # ⛔ THE RECORDED LOAD ERROR. See the ⛔ note in the header: a rule the engine could
+    # not load is reported, never thrown, so only the report shows it. Keyed on the EXIT
+    # CODE (see the ⚠ note in the header), not on the "Validation complete:" line.
+    if [ "$rc" -eq 0 ]; then
+        [ -s "$work/report.json" ] \
+            || fail "rule package '$p' exited 0 but wrote no report to $work/report.json — a run that writes nothing is a broken report-writer chain"
+        report="$(< "$work/report.json")"
+        # ⚠ NON-VACUITY, per report: the rows this arm reads must be there in the shape
+        # it reads them, or a renamed key would turn it into a no-op.
+        case "$report" in
+            *'"Rules_Report"'*) ;;
+            *) fail "the report for rule package '$p' has no Rules_Report — its shape changed, and the recorded-load-error check would have read nothing" ;;
+        esac
+        n="$(printf '%s' "$report" \
+                | grep -oE '"status"[[:space:]]*:[[:space:]]*"[A-Z_]+"' | wc -l)" || true
+        nrows=$((nrows + n))
+        n="$(printf '%s' "$report" \
+                | grep -oE '"status"[[:space:]]*:[[:space:]]*"EXECUTION_ERROR"' | wc -l)" || true
+        if [ "$n" -gt 0 ]; then
+            # BEST-EFFORT, for the operator only — the count above is the verdict. The
+            # report is flattened onto one line first (tr), so a pretty-printed report
+            # yields the message too; it still assumes the row's message immediately
+            # precedes its status, as the report writer orders the keys. A load error's
+            # message opens with the rule id in brackets, so it names rule and cause.
+            why="$(printf '%s' "$report" | tr '\n' ' ' \
+                    | grep -oE '"message"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"[[:space:]]*,[[:space:]]*"status"[[:space:]]*:[[:space:]]*"EXECUTION_ERROR"' \
+                    | head -1 \
+                    | sed -E 's/^"message"[[:space:]]*:[[:space:]]*"//; s/"[[:space:]]*,[[:space:]]*"status".*$//')" || true
+            recorded="$recorded
+smoke:   rules-$p.json: $n EXECUTION_ERROR row(s), first: ${why:-no message found next to the status (best-effort extraction)}"
+            nrecorded=$((nrecorded + 1))
+        fi
+        case "$out" in
+            *"Validation complete:"*) executed=$((executed + 1)) ;;
+            *) stalled="$stalled rules-$p.json" ;;
+        esac
+    fi
     if [ -z "$loadedfrom" ]; then
         while IFS= read -r line; do
             case "$line" in
@@ -386,6 +413,15 @@ if [ "$nrecorded" -gt 0 ]; then
     exit 1
 fi
 
+# ⛔ ACCOUNTING (see the ⛔ note in the header): every declared package either executed
+# or was refused with a named refusal. A package that exited 0 without reaching
+# "Validation complete:" is neither, and is named here.
+if [ $((executed + nrefused)) -ne "$npkg" ]; then
+    echo "smoke: $executed executed + $nrefused refused != $npkg packages declared by rules/packages.json." >&2
+    echo "smoke: exited 0 without a 'Validation complete:' line:${stalled:- none}" >&2
+    exit 1
+fi
+
 # ⚠ NON-VACUITY across the corpus: the recorded-load-error check read at least one
 # rule row, so an empty Rules_Report everywhere cannot pass for a clean corpus.
 [ "$nrows" -ge 1 ] \
@@ -405,10 +441,8 @@ case "$loadedfrom" in
     *) fail "corej.rules.dir did not resolve to the bundle: the engine loaded rules from '$loadedfrom', expected $BUNDLE/rules/" ;;
 esac
 
-# The report the run was asked for must exist and carry content. A run that logs
-# "Validation complete" and writes nothing is a broken report-writer chain.
-[ -s "$work/report.json" ] \
-    || fail "the run completed but wrote no report to $work/report.json"
+# ⚠ No post-loop report check: the last package may legitimately be a refusal (exit 2,
+# no report), and every package that exited 0 had its own report asserted in the loop.
 # ---- Probe 2: the report writers actually on the classpath --------------------
 set +e
 out="$(cd "$work" && "$BUNDLE/run.sh" \
@@ -470,3 +504,7 @@ echo "smoke: OK — $BUNDLE launched, loaded the engine and its report writers,"
 echo "smoke:      resolved corej.rules.dir to the bundle ($libcount jars in lib/),"
 echo "smoke:      LOADED all $npkg bundled rule packages with the engine and ran"
 echo "smoke:      rules to completion in $executed of them"
+if [ "$nrefused" -gt 0 ]; then
+    echo "smoke:      $nrefused refused with a named selection refusal (loaded, NOT run):"
+    echo "${refused#$'\n'}"
+fi
