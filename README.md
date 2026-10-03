@@ -319,9 +319,11 @@ SKIPs — loudly, by name. Three seeding modes build it, each running standalone
 `--seed-overwrite` re-acquires everything instead of carrying forward what the store already
 holds; `--seed-dry-run` reports what a run would change without touching it.
 
-⚠ **Store format 4 (2026-09-28).** A store seeded before it (format 3, or format 2 from a release
+⚠ **Store format 5 (2026-10-03).** Format 5 adds the errata register (corrections of CDISC Library
+content, each citing its printed source) and text normalisation; format 4 (2026-09-28) added the
+CDASH fields' codelist C-codes. A store seeded before it (format 4, 3, or 2 from a release
 before 2026-09-26) is refused — every run on it exits 2 naming the file and `--seed-cache` — never
-read with the new fields empty (format 4 added the CDASH fields' codelist C-codes); re-seed once
+read without the corrections; re-seed once
 with a plain `--seed-cache`. A store written by a NEWER build than this tool is refused the other way
 round (*"upgrade this tool"*): `--seed-cache` leaves it alone unless `--seed-overwrite` is passed.
 
