@@ -121,8 +121,9 @@ import picocli.CommandLine.ParseResult;
  *   -ct, --controlled-terminology-package &lt;pkg&gt;
  *                                         CT package id, repeatable. Governs the dataset run AND
  *                                         -vx (an explicit list replaces the define's declared
- *                                         CT or, failing that, the Trial Summary's); a named
- *                                         package the store lacks ABORTS the whole invocation
+ *                                         CT or, for the dataset run, failing that, the Trial
+ *                                         Summary's); a named package the store lacks ABORTS
+ *                                         the whole invocation
  *                                         (exit 2, no report of either kind)
  *   -dv, --define-version &lt;ver&gt;           Define-XML version (2-1, 2.0); selects the
  *                                         rule package, so a bogus value is an error
@@ -674,7 +675,7 @@ public final class CdiscValidate
                 }
                 if (ctDeclarationMismatch != null)
                 {
-                    err.println("CT declaration mismatch: " + ctDeclarationMismatch);
+                    err.println("CT selection: " + ctDeclarationMismatch);
                 }
                 LOGGER.log(System.Logger.Level.INFO,
                         "Validation complete (remote): {0} findings. Report: {1}",
@@ -1628,10 +1629,12 @@ public final class CdiscValidate
         }
         // PLAN-report-conformance-fields R7 (define-ct §4.2 P7): the CT declaration mismatch is
         // the same kind of run-level note, printed the same way, only when the report carries it.
+        // Its prefix is "CT selection:" because the note also carries the Trial Summary adoption
+        // (PLAN-ct-packages-default-and-ts-source review M1, CQ7 (a)), which is no mismatch.
         String ctDeclarationMismatch = result.conformance().ctDeclarationMismatch();
         if (ctDeclarationMismatch != null)
         {
-            err.println("CT declaration mismatch: " + ctDeclarationMismatch);
+            err.println("CT selection: " + ctDeclarationMismatch);
         }
 
         // Phase E: write report(s) — one file per requested format, all sharing the base name.
@@ -2381,7 +2384,8 @@ public final class CdiscValidate
         out.println("                                   CT package id, repeatable; governs the");
         out.println("                                   dataset run and -vx (an explicit list");
         out.println("                                   replaces the define's declared CT or,");
-        out.println("                                   failing that, the Trial Summary's)");
+        out.println("                                   for the dataset run, failing that, the");
+        out.println("                                   Trial Summary's)");
         out.println("  -dv, --define-version <ver>      Define-XML version");
         out.println(
                 "  -r,  --rules <CORE-id>           include only matching rule ids (repeatable)");

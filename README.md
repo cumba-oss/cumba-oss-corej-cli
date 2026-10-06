@@ -210,7 +210,7 @@ Other options worth knowing (`--help` prints the full banner):
 | `-o`, `--output` | output file (default `CORE-Report-<ts>.json`) |
 | `-of`, `--output-format` | repeatable/comma-separated; the accepted names are enumerated at runtime from the report writers on the classpath (`json`, `json-2`, `xlsx`) |
 | `-vx`, `--validate-xml` | also run Define-XML conformance on `-dxp`; **requires `--define-family`** (CDISC and/or PMDA). Its `Requires: ct` / `Requires: library` rules read the metadata store like every other check; with no store they SKIP, named on the `CT basis:` / `Library basis:` stderr lines |
-| `-ct`, `--controlled-terminology-package` | CT package id, repeatable; governs the dataset run **and** `-vx` (an explicit list replaces the define's own declaration or, failing that, the Trial Summary's). ⚠ A named package the store does not hold **aborts the whole invocation**: exit 2, no report of either kind |
+| `-ct`, `--controlled-terminology-package` | CT package id, repeatable; governs the dataset run **and** `-vx` (an explicit list replaces the define's own declaration or, for the dataset run, failing that, the Trial Summary's). ⚠ A named package the store does not hold **aborts the whole invocation**: exit 2, no report of either kind |
 | `-t`, `--threads` | rule worker threads per dataset (default 1) |
 | `-sl`, `--severity-level` | weakest level evaluated: Reject, Error, Warning (default) or Info |
 | `-h`, `--help` | usage |

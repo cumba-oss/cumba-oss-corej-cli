@@ -669,11 +669,11 @@ class CdiscValidateTest
         Captured mismatch = runOffline(source, rulesDir, "ct-mismatch", "-dxp", define.toString(),
                 "-ct", "sdtmct-2024-09-27");
         assertTrue(mismatch.errAsString().contains(
-                "CT declaration mismatch: define declares sdtmct-2023-12-15; run used sdtmct-2024-09-27"),
+                "CT selection: define declares sdtmct-2023-12-15; run used sdtmct-2024-09-27"),
                 mismatch.errAsString());
 
         Captured agreeing = runOffline(source, rulesDir, "ct-agree", "-dxp", define.toString());
-        assertFalse(agreeing.errAsString().contains("CT declaration mismatch"),
+        assertFalse(agreeing.errAsString().contains("CT selection:"),
                 "declaration and selection agree, so no line: " + agreeing.errAsString());
     }
 

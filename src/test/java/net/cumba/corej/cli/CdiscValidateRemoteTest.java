@@ -177,7 +177,7 @@ class CdiscValidateRemoteTest
         RunResult healthy = runCapturingErr("--remote", baseUrl(), "-d", data.toString(), "-o",
                 tmp.resolve("healthy.json").toString());
         assertEquals(0, healthy.code());
-        assertFalse(healthy.err().contains("CT declaration mismatch:"),
+        assertFalse(healthy.err().contains("CT selection:"),
                 "an agreeing remote report must not fabricate a mismatch line: " + healthy.err());
 
         reportBody = "{\"Conformance_Details\":{\"Standard\":\"SDTMIG\","
@@ -188,7 +188,7 @@ class CdiscValidateRemoteTest
         assertEquals(0, degraded.code());
         assertTrue(
                 degraded.err()
-                        .contains("CT declaration mismatch: define declares "
+                        .contains("CT selection: define declares "
                                 + "sdtmct-2023-12-15; run used sdtmct-2024-09-27"),
                 "the mismatch must reach stderr in remote mode too: " + degraded.err());
     }
