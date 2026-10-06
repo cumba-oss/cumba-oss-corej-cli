@@ -121,8 +121,9 @@ import picocli.CommandLine.ParseResult;
  *   -ct, --controlled-terminology-package &lt;pkg&gt;
  *                                         CT package id, repeatable. Governs the dataset run AND
  *                                         -vx (an explicit list replaces the define's declared
- *                                         CT); a named package the store lacks ABORTS the whole
- *                                         invocation (exit 2, no report of either kind)
+ *                                         CT or, failing that, the Trial Summary's); a named
+ *                                         package the store lacks ABORTS the whole invocation
+ *                                         (exit 2, no report of either kind)
  *   -dv, --define-version &lt;ver&gt;           Define-XML version (2-1, 2.0); selects the
  *                                         rule package, so a bogus value is an error
  *        --define-family &lt;sheet&gt;           REQUIRED for -vx: CDISC and/or PMDA
@@ -2088,10 +2089,11 @@ public final class CdiscValidate
         }
         if (message != null && message.contains(net.cumba.corej.core.run.CtPresence.CT_FIELD_HATCH))
         {
-            // The engine's DEFINE-source abort names the data browser's field; on this surface
-            // the same hatch is -ct (review round 1, M1).
+            // The engine's DEFINE- and TS-source aborts name the data browser's field; on this
+            // surface the same hatch is -ct (review round 1, M1; the Trial Summary source,
+            // PLAN-ct-packages-default-and-ts-source CTD-2).
             return message + " On the command line: -ct <id> (repeatable) replaces the define's"
-                    + " declaration, and --seed-cache seeds the store.";
+                    + " declaration and the Trial Summary's, and --seed-cache seeds the store.";
         }
         return message != null ? message : aFailure.getClass().getSimpleName();
     }
@@ -2378,7 +2380,8 @@ public final class CdiscValidate
         out.println("  -ct, --controlled-terminology-package <pkg>");
         out.println("                                   CT package id, repeatable; governs the");
         out.println("                                   dataset run and -vx (an explicit list");
-        out.println("                                   replaces the define's declared CT)");
+        out.println("                                   replaces the define's declared CT or,");
+        out.println("                                   failing that, the Trial Summary's)");
         out.println("  -dv, --define-version <ver>      Define-XML version");
         out.println(
                 "  -r,  --rules <CORE-id>           include only matching rule ids (repeatable)");

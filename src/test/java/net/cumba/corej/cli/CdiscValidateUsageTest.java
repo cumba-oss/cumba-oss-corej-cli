@@ -225,7 +225,9 @@ class CdiscValidateUsageTest
         // and the Authentication block says the key is for --seed-cache-from-api only (+2).
         // 152 since PLAN-use-case-scope-filter L1: -uc says it is one code and that rules naming
         // only other use cases are reported SKIPPED (1 line -> 4).
-        assertEquals(152, lineCount, "help banner line count changed: " + lineCount);
+        // 153 since PLAN-ct-packages-default-and-ts-source C12: -ct says an explicit list replaces
+        // the define's declared CT "or, failing that, the Trial Summary's" (2 lines -> 3).
+        assertEquals(153, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();
