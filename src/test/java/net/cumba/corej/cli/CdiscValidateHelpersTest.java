@@ -744,7 +744,8 @@ class CdiscValidateHelpersTest
      * 5e last LOW (PLAN-ct-packages-default-and-ts-source): the engine's CT abort keeps "Seed the
      * store with it" for a published-but-unseeded package, so this surface names {@code -ct} and
      * {@code --seed-cache}; for a package no CDISC CT release carries ({@code
-     * CtPresence.UNKNOWN_RELEASE}) seeding cannot help, so only {@code -ct} is named.
+     * CtPresence.UNKNOWN_RELEASE}) or a malformed id ({@code CtPresence.MALFORMED_ID}) seeding
+     * cannot help, so only {@code -ct} is named.
      */
     @Test
     void withStoreRemedy_namesSeedCacheOnlyWhenSeedingCanHelp()
@@ -769,6 +770,16 @@ class CdiscValidateHelpersTest
         assertTrue(withoutSeeding.startsWith(unknown), withoutSeeding);
         assertTrue(withoutSeeding.contains("-ct <id>"), withoutSeeding);
         assertFalse(withoutSeeding.contains("seed"), withoutSeeding);
+
+        String malformed = "The Define-XML declares controlled-terminology package"
+                + " 'sdtmct-Draft' (def:Standards), which "
+                + net.cumba.corej.core.run.CtPresence.MALFORMED_ID
+                + " (expected <family>ct-<yyyy-mm-dd>). Correct the id, or " + hatch;
+        String forMalformed = CdiscValidate
+                .withStoreRemedy(new net.cumba.corej.core.run.StudyValidationException(malformed));
+        assertTrue(forMalformed.startsWith(malformed), forMalformed);
+        assertTrue(forMalformed.contains("-ct <id>"), forMalformed);
+        assertFalse(forMalformed.contains("seed"), forMalformed);
     }
 
 

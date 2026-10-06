@@ -2095,12 +2095,14 @@ public final class CdiscValidate
             // The engine's DEFINE- and TS-source aborts name the data browser's field; on this
             // surface the same hatch is -ct (review round 1, M1; the Trial Summary source,
             // PLAN-ct-packages-default-and-ts-source CTD-2). Seeding is named only when it can
-            // help: never for a package no CDISC CT release carries (5e last LOW).
+            // help: never for a package no CDISC CT release carries (5e last LOW) nor for a
+            // malformed id (5e follow-up).
             String hatch = " On the command line: -ct <id> (repeatable) replaces the define's"
                     + " declaration and the Trial Summary's";
             return message.contains(net.cumba.corej.core.run.CtPresence.UNKNOWN_RELEASE)
-                    ? message + hatch + "."
-                    : message + hatch + ", and --seed-cache seeds the store.";
+                    || message.contains(net.cumba.corej.core.run.CtPresence.MALFORMED_ID)
+                            ? message + hatch + "."
+                            : message + hatch + ", and --seed-cache seeds the store.";
         }
         return message != null ? message : aFailure.getClass().getSimpleName();
     }
