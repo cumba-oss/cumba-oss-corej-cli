@@ -741,6 +741,38 @@ class CdiscValidateHelpersTest
 
 
     /**
+     * 5e last LOW (PLAN-ct-packages-default-and-ts-source): the engine's CT abort keeps "Seed the
+     * store with it" for a published-but-unseeded package, so this surface names {@code -ct} and
+     * {@code --seed-cache}; for a package no CDISC CT release carries ({@code
+     * CtPresence.UNKNOWN_RELEASE}) seeding cannot help, so only {@code -ct} is named.
+     */
+    @Test
+    void withStoreRemedy_namesSeedCacheOnlyWhenSeedingCanHelp()
+    {
+        String hatch = net.cumba.corej.core.run.CtPresence.CT_FIELD_HATCH
+                + " - an explicit selection takes the define's declaration out of play.";
+        String unseeded = "The Define-XML declares controlled-terminology package"
+                + " 'sdtmct-2023-12-15' (def:Standards), which is not held by the metadata store at"
+                + " s.zip. Seed the store with it, or " + hatch;
+        String withSeeding = CdiscValidate
+                .withStoreRemedy(new net.cumba.corej.core.run.StudyValidationException(unseeded));
+        assertTrue(withSeeding.startsWith(unseeded), withSeeding);
+        assertTrue(withSeeding.contains("-ct <id>"), withSeeding);
+        assertTrue(withSeeding.contains("--seed-cache"), withSeeding);
+
+        String unknown = "The Define-XML declares controlled-terminology package"
+                + " 'sdtmct-2023-12-16' (def:Standards), which is not held by the metadata store at"
+                + " s.zip; " + net.cumba.corej.core.run.CtPresence.UNKNOWN_RELEASE
+                + ". Correct the date, or " + hatch;
+        String withoutSeeding = CdiscValidate
+                .withStoreRemedy(new net.cumba.corej.core.run.StudyValidationException(unknown));
+        assertTrue(withoutSeeding.startsWith(unknown), withoutSeeding);
+        assertTrue(withoutSeeding.contains("-ct <id>"), withoutSeeding);
+        assertFalse(withoutSeeding.contains("seed"), withoutSeeding);
+    }
+
+
+    /**
      * The production download wiring, asserted without making a request: {@code httpDownloads()}
      * builds a source for each credential-free type and refuses the rest. Without this the seam's
      * production binding would be reachable only from {@code main}, i.e. from nothing the suite
