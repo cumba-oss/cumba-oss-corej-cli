@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import net.cumba.corej.core.run.CtPresence;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -507,7 +508,10 @@ class CdiscValidateDefineXmlTest
                 err);
         assertTrue(err.contains("fill the CT Packages field"), "the escape hatch is named: " + err);
         assertTrue(err.contains("-ct <id>"), "this surface's own hatch is named (M1): " + err);
-        assertTrue(err.contains("--seed-cache"), err);
+        // 1999-01-01 is no CDISC CT release: seeding cannot help, so the CLI names no --seed-cache
+        // (5e review fold, CtPresence.UNKNOWN_RELEASE).
+        assertTrue(err.contains(CtPresence.UNKNOWN_RELEASE), err);
+        assertFalse(err.contains("--seed-cache"), err);
     }
 
 
