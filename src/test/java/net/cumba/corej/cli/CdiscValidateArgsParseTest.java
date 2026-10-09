@@ -364,8 +364,8 @@ class CdiscValidateArgsParseTest
     void parse_useCase_isTrimmed() throws Exception
     {
         assertEquals("INDH", useCase(parse("-d", "/tmp", "-uc", "  INDH ")));
-        assertEquals("nonclin", useCase(parse("-d", "/tmp", "--use-case", "nonclin")),
-                "case is the engine's business (it compares case-insensitively)");
+        assertEquals("NONCLIN", useCase(parse("-d", "/tmp", "--use-case", "nonclin")),
+                "the engine upper-cases the use case (StudyValidationParams.useCase)");
     }
 
 
