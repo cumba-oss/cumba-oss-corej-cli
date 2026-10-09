@@ -102,12 +102,21 @@ jobs:
       # which Maven reads from 3.9 on. `-gs` (global settings) MERGES with the
       # user ~/.m2/settings.xml that setup-java writes for the Central
       # credentials; nothing is overwritten. It must run before the first `mvn`.
+      # ⚠ An older Maven IGNORES MAVEN_ARGS without a word and resolves no
+      # sibling snapshot, so the step refuses a Maven below 3.9, loudly.
       # ⚠ Tag runs get neither the file nor the variable: a release resolves
       # released artifacts only (requireReleaseDeps guards that as well).
       # This step is byte-identical in every cumba-oss repo; copy it unchanged.
       - name: Configure Central snapshot repository
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
+          # Unanchored: a colour code may precede "Apache Maven" on the line.
+          mvn_version="$(mvn -B -v 2>/dev/null | sed -n 's/.*Apache Maven \([0-9][0-9.]*\).*/\1/p' | head -1)" || mvn_version=""
+          IFS=. read -r mvn_major mvn_minor _ <<< "${mvn_version:-0.0}"
+          if (( mvn_major < 3 || (mvn_major == 3 && mvn_minor < 9) )); then
+            echo "::error::Maven '${mvn_version:-?}' (from mvn -v): MAVEN_ARGS needs Maven >= 3.9 (an older one ignores it silently, and no sibling snapshot resolves)." >&2
+            exit 1
+          fi
           cat > "$RUNNER_TEMP/central-snapshots.xml" <<'EOF'
           <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
