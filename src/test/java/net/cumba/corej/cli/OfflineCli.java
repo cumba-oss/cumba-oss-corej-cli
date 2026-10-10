@@ -2,7 +2,7 @@ package net.cumba.corej.cli;
 
 import java.io.IOException;
 import java.io.PrintStream;
-import net.cumba.corej.core.metadata.dictionary.DictionarySource;
+import net.cumba.datatable.dictionary.convert.DictionarySource;
 
 /**
  * Runs the CLI with dictionary downloads <b>denied</b>.

@@ -229,7 +229,9 @@ class CdiscValidateUsageTest
         // the define's declared CT "or, failing that, the Trial Summary's" (2 lines -> 3).
         // 154 since its review L3: the TS fallback is "for the dataset run" only (-vx never reads
         // the Trial Summary), one more -ct line.
-        assertEquals(154, lineCount, "help banner line count changed: " + lineCount);
+        // 157 since PLAN-dictionary-backed-formats B4: --install-dictionaries says it writes house
+        // format 2 (code labels for MedDRA / WHODrug) and warns about format-1 files (+3).
+        assertEquals(157, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();

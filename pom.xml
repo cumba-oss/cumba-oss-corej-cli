@@ -1601,6 +1601,7 @@
             <!-- Upstream cumba-oss-datatable modules (released separately). -->
             <dependency><groupId>net.cumba</groupId><artifactId>cumba-oss-datatable</artifactId><version>${dependency.cumba-oss-datatable.version}</version></dependency>
             <dependency><groupId>net.cumba</groupId><artifactId>cumba-oss-datatable-impl</artifactId><version>${dependency.cumba-oss-datatable.version}</version></dependency>
+            <dependency><groupId>net.cumba</groupId><artifactId>cumba-oss-datatable-dictionary</artifactId><version>${dependency.cumba-oss-datatable.version}</version></dependency>
             <dependency><groupId>net.cumba</groupId><artifactId>cumba-oss-cdisc-define</artifactId><version>${dependency.cumba-oss-datatable.version}</version></dependency>
             <dependency><groupId>net.cumba</groupId><artifactId>cumba-oss-datatable-provider-define</artifactId><version>${dependency.cumba-oss-datatable.version}</version></dependency>
             <dependency><groupId>net.cumba</groupId><artifactId>cumba-oss-datatable-provider-cdt</artifactId><version>${dependency.cumba-oss-datatable.version}</version></dependency>
@@ -1785,6 +1786,14 @@
         <dependency>
             <groupId>net.cumba</groupId>
             <artifactId>cumba-oss-datatable-impl</artifactId>
+        </dependency>
+        <!--
+            The install-dictionaries option: the installer, converters and sources live in the shared
+            dictionary module since PLAN-dictionary-backed-formats B-OSS (imported directly).
+        -->
+        <dependency>
+            <groupId>net.cumba</groupId>
+            <artifactId>cumba-oss-datatable-dictionary</artifactId>
         </dependency>
 
         <dependency>

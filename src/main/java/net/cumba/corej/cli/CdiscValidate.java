@@ -21,21 +21,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import net.cumba.corej.core.CoreLibraryAccess;
 import net.cumba.corej.core.metadata.MetadataProductCatalogue;
-import net.cumba.corej.core.metadata.dictionary.DictionaryConverter;
-import net.cumba.corej.core.metadata.dictionary.DictionaryDirectoryResolver;
-import net.cumba.corej.core.metadata.dictionary.DictionaryInstaller;
-import net.cumba.corej.core.metadata.dictionary.DictionaryLicences;
-import net.cumba.corej.core.metadata.dictionary.DictionarySource;
-import net.cumba.corej.core.metadata.dictionary.HttpDictionarySource;
-import net.cumba.corej.core.metadata.dictionary.InstallReport;
-import net.cumba.corej.core.metadata.dictionary.LocalDictionarySource;
-import net.cumba.corej.core.metadata.dictionary.LoincConverter;
-import net.cumba.corej.core.metadata.dictionary.MedDraConverter;
-import net.cumba.corej.core.metadata.dictionary.MedRtConverter;
-import net.cumba.corej.core.metadata.dictionary.NeoplasmConverter;
-import net.cumba.corej.core.metadata.dictionary.SnomedConverter;
-import net.cumba.corej.core.metadata.dictionary.UniiConverter;
-import net.cumba.corej.core.metadata.dictionary.WhoDrugConverter;
 import net.cumba.corej.core.metadata.pickle.HttpArchivePickleSource;
 import net.cumba.corej.core.metadata.pickle.LocalPickleSource;
 import net.cumba.corej.core.metadata.pickle.PickleSource;
@@ -63,6 +48,23 @@ import net.cumba.corej.define.conformance.engine.DefineConformanceReport;
 import net.cumba.corej.define.conformance.engine.JsonReportWriter;
 import net.cumba.corej.define.conformance.rule.DefineRuleSelectionException;
 import net.cumba.corej.define.conformance.rule.RuleSet;
+import net.cumba.datatable.dictionary.convert.DictionaryConverter;
+import net.cumba.datatable.dictionary.convert.DictionaryDirectoryResolver;
+import net.cumba.datatable.dictionary.convert.DictionaryInstaller;
+import net.cumba.datatable.dictionary.convert.DictionaryLicences;
+import net.cumba.datatable.dictionary.convert.DictionarySource;
+import net.cumba.datatable.dictionary.convert.HttpDictionarySource;
+import net.cumba.datatable.dictionary.convert.InstallReport;
+import net.cumba.datatable.dictionary.convert.LocalDictionarySource;
+import net.cumba.datatable.dictionary.convert.LoincConverter;
+import net.cumba.datatable.dictionary.convert.MedDraConverter;
+import net.cumba.datatable.dictionary.convert.MedRtConverter;
+import net.cumba.datatable.dictionary.convert.NeoplasmConverter;
+import net.cumba.datatable.dictionary.convert.SnomedConverter;
+import net.cumba.datatable.dictionary.convert.UniiConverter;
+import net.cumba.datatable.dictionary.convert.WhoDrugConverter;
+import net.cumba.datatable.dictionary.house.HouseDictionaryReader;
+import net.cumba.datatable.dictionary.house.ValueMapDictionary;
 import net.cumba.datatable.io.Property;
 import net.cumba.datatable.manager.IDataTableManager;
 import net.cumba.datatable.manager.local.LocalDataTableManager;
@@ -1271,6 +1273,56 @@ public final class CdiscValidate
         return MetadataCacheLocator.defaultStore().toAbsolutePath();
     }
 
+    /**
+     * The types whose code columns need house format 2 for labels (decodes of MedDRA / WHODrug).
+     */
+    private static final List<String> LABELLED_CODE_TYPES = List.of("meddra", "whodrug");
+
+    /**
+     * PLAN-dictionary-backed-formats B4: one line per installed MedDRA / WHODrug version still in
+     * house format 1 — the installer writes format 2 now, whose {@code decodes} carry the labels of
+     * their code columns (for a reader that shows them); validation verdicts are the same either
+     * way.
+     *
+     * @param aStore
+     *            the store the install mode wrote to.
+     * @return the warning lines, empty when nothing predates format 2 or the store is absent.
+     */
+    static List<String> houseFormat1Warnings(Path aStore)
+    {
+        List<String> out = new ArrayList<>();
+        for (String type : LABELLED_CODE_TYPES)
+        {
+            Path typeDir = aStore.resolve(type);
+            if (!Files.isDirectory(typeDir))
+            {
+                continue;
+            }
+            try (java.util.stream.Stream<Path> versions = Files.list(typeDir))
+            {
+                for (Path versionDir : versions.filter(Files::isDirectory).sorted().toList())
+                {
+                    for (String name : List.of(type + ".json", type + ".json.gz"))
+                    {
+                        Path file = versionDir.resolve(name);
+                        if (Files.isRegularFile(file) && HouseDictionaryReader.readHeader(file)
+                                .houseFormat() < ValueMapDictionary.HOUSE_FORMAT_2)
+                        {
+                            out.add(type + " " + versionDir.getFileName() + " is house format 1 — "
+                                    + "re-install it (--" + type + " <dir>) to add the code "
+                                    + "labels of house format 2");
+                        }
+                    }
+                }
+            }
+            catch (IOException ex)
+            {
+                LOGGER.log(System.Logger.Level.DEBUG, "could not scan " + typeDir, ex);
+            }
+        }
+        return out;
+    }
+
 
     /**
      * {@code --install-dictionaries}: installs dictionaries into the versioned store, records each
@@ -1408,6 +1460,10 @@ public final class CdiscValidate
                             + " — review the licence or terms-of-use notice written there");
                 }
                 aErr.println("  provenance: " + target.resolve(DictionaryInstaller.SOURCES_FILE));
+            }
+            for (String stale : houseFormat1Warnings(target))
+            {
+                aErr.println("  warning: " + stale);
             }
             return failed ? 1 : 0;
         }
@@ -2488,6 +2544,9 @@ public final class CdiscValidate
                 "                                   --meddra <dir> --whodrug <dir> --loinc <dir>");
         out.println("                                   --medrt <dir> --unii <dir> --snomed <dir>");
         out.println("                                   --neoplasm <dir>");
+        out.println("                                   Writes house format 2 (code labels for");
+        out.println("                                   MedDRA / WHODrug); warns about format-1");
+        out.println("                                   MedDRA / WHODrug files in the store.");
         out.println("       --set-default               rebind an existing manifest selection to");
         out.println("                                   the version being installed");
         out.println("       --skip-installed            leave a type/version that is already in");

@@ -14,8 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
-import net.cumba.corej.core.metadata.dictionary.DictionaryDirectoryResolver;
-import net.cumba.corej.core.metadata.dictionary.DictionaryStore;
+import net.cumba.datatable.dictionary.convert.DictionaryDirectoryResolver;
+import net.cumba.datatable.dictionary.house.DictionaryStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -841,4 +841,39 @@ class CdiscValidateInstallDictionariesTest
         }
     }
 
+
+    /**
+     * PLAN-dictionary-backed-formats B4: the install mode names every MedDRA / WHODrug version
+     * still in house format 1 (no decodes section) — one line each; format-2 files and the other
+     * types (whose format-1 files already decode) are never named.
+     */
+    @Test
+    void houseFormat1MeddraAndWhodrugFilesAreNamed_oneLineEach(@TempDir Path aStore)
+        throws IOException
+    {
+        writeHouse(aStore, "meddra", "26.0", "{\"type\":\"meddra\",\"levels\":{}}");
+        writeHouse(aStore, "meddra", "27.1", "{\"type\":\"meddra\",\"house_format\":2}");
+        writeHouse(aStore, "whodrug", "SEP_2020", "{\"type\":\"whodrug\"}");
+        writeHouse(aStore, "loinc", "2.80", "{\"type\":\"loinc\"}");
+
+        java.util.List<String> warnings = CdiscValidate.houseFormat1Warnings(aStore);
+
+        assertEquals(2, warnings.size(), warnings.toString());
+        assertTrue(
+                warnings.get(0).startsWith(
+                        "meddra 26.0 is house format 1 — re-install it " + "(--meddra <dir>)"),
+                warnings.toString());
+        assertTrue(warnings.get(1).startsWith("whodrug SEP_2020 is house format 1"),
+                warnings.toString());
+        assertEquals(java.util.List.of(),
+                CdiscValidate.houseFormat1Warnings(aStore.resolve("no-such-store")));
+    }
+
+
+    private static void writeHouse(Path aStore, String aType, String aVersion, String aJson)
+        throws IOException
+    {
+        Path dir = Files.createDirectories(aStore.resolve(aType).resolve(aVersion));
+        Files.writeString(dir.resolve(aType + ".json"), aJson);
+    }
 }
