@@ -322,7 +322,8 @@ smoke:   rules-$p.json: $(explain_load_failure "$out")"
     # CdiscValidate maps EVERY StudyValidationException to `Error: …` / exit 2, and the
     # engine's run/ package throws it from 14 sites — "no datasets", "no rules", and
     # review finding R-8's CORPUS fault (a package declaring a CDISC Library standard
-    # that cannot be resolved, as the sendig/dart-1-2 packages once did). Judging
+    # that the store cannot resolve — as the two sendig/dart-1-2 packages do on a store
+    # seeded before the E14 seed supplement, PLAN-seed-sendig-dart-1-2). Judging
     # the exit CODE alone accepted all of them silently, while the REST twin is fatal on
     # the very same event — the two probes are meant to stay in step, so key on the two
     # INTENDED refusal messages here exactly as the REST probe does.
