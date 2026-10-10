@@ -354,6 +354,20 @@ public final class CdiscValidate
 
 
     /**
+     * The manager a validation run loads its data through: dictionary formats switched off
+     * (PLAN-dictionary-backed-formats, owner ruling OQ3 (a), 2026-10-10). The engine reads the
+     * dictionaries itself and reads no format, so resolving them at load would only parse every
+     * dictionary the define binds a second time, on every run.
+     *
+     * @return a new local manager with dictionary formats switched off.
+     */
+    static LocalDataTableManager validationManager()
+    {
+        return new LocalDataTableManager(false);
+    }
+
+
+    /**
      * <b>The binding {@link #main(String[])} uses</b>, and the shipped binary's exit-code contract:
      * same behaviour as {@code main} but writing to the supplied streams and <em>returning</em> the
      * process exit code instead of calling {@link System#exit(int)}. Every outbound channel gets
@@ -1547,7 +1561,7 @@ public final class CdiscValidate
             return 2;
         }
 
-        IDataTableManager manager = new LocalDataTableManager();
+        IDataTableManager manager = validationManager();
 
         List<String> outputFormats = resolveOutputFormats(args.outputFormats);
         Path outputBase = resolveOutputBase(args.output);
