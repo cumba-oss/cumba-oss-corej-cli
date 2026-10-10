@@ -1304,7 +1304,7 @@ public final class CdiscValidate
             {
                 versionDirs = versions.filter(Files::isDirectory).sorted().toList();
             }
-            catch (IOException | java.io.UncheckedIOException ex)
+            catch (IOException | UncheckedIOException ex)
             {
                 // B-T review lane 2 L3: a listing error is reported, never a failed install
                 out.add("could not list " + typeDir + " (" + ex.getMessage()
