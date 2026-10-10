@@ -870,6 +870,35 @@ class CdiscValidateInstallDictionariesTest
     }
 
 
+    /**
+     * B-T review lane 2 L3: an unreadable file is named on its own line and the scan goes on —
+     * before, its IOException ended the scan of the type's other versions (logged at DEBUG only).
+     */
+    @Test
+    void anUnreadableHouseFileIsNamed_andTheOtherVersionsAreStillScanned(@TempDir Path aStore)
+        throws IOException
+    {
+        writeHouse(aStore, "meddra", "25.0", "{ truncated");
+        Path gz = aStore.resolve("meddra").resolve("25.1");
+        Files.createDirectories(gz);
+        Files.writeString(gz.resolve("meddra.json.gz"), "not gzip");
+        writeHouse(aStore, "meddra", "26.0", "{\"type\":\"meddra\",\"levels\":{}}");
+
+        java.util.List<String> warnings = CdiscValidate.houseFormat1Warnings(aStore);
+
+        assertEquals(3, warnings.size(), warnings.toString());
+        assertTrue(
+                warnings.get(0).startsWith("could not read ") && warnings.get(0).contains("25.0")
+                        && warnings.get(0).endsWith("its house format is unknown"),
+                warnings.toString());
+        assertTrue(
+                warnings.get(1).startsWith("could not read ") && warnings.get(1).contains("25.1"),
+                warnings.toString());
+        assertTrue(warnings.get(2).startsWith("meddra 26.0 is house format 1"),
+                "the scan went on past the unreadable files: " + warnings);
+    }
+
+
     private static void writeHouse(Path aStore, String aType, String aVersion, String aJson)
         throws IOException
     {

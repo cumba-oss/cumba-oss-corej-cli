@@ -231,7 +231,10 @@ class CdiscValidateUsageTest
         // the Trial Summary), one more -ct line.
         // 157 since PLAN-dictionary-backed-formats B4: --install-dictionaries says it writes house
         // format 2 (code labels for MedDRA / WHODrug) and warns about format-1 files (+3).
-        assertEquals(157, lineCount, "help banner line count changed: " + lineCount);
+        // 158 since its B-T review fold: --set-default says it also rebinds to a version already
+        // in the store — the deliberate act; the dictionary manager's "newly installed" box no
+        // longer moves the selection on a re-install (DF19; 2 lines -> 3).
+        assertEquals(158, lineCount, "help banner line count changed: " + lineCount);
         // Exactly 10 of those are blank separator lines (the bare println() calls). Removing one
         // drops the blank-line tally and fails this assertion.
         long blankLines = usage.lines().filter(String::isEmpty).count();

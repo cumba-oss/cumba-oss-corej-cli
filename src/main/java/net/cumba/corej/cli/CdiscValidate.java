@@ -167,7 +167,8 @@ import picocli.CommandLine.ParseResult;
  *                                          distributions: --meddra --whodrug --loinc --medrt
  *                                          --unii --snomed --neoplasm, each taking a
  *                                          directory; --set-default rebinds an existing
- *                                          selection, --skip-installed leaves an
+ *                                          selection, also to a version already installed,
+ *                                          --skip-installed leaves an
  *                                          already-installed type/version untouched
  *                                          (idempotent re-runs), --dry-run writes nothing. Outside
  *                                          install mode the input options stay
@@ -1298,14 +1299,30 @@ public final class CdiscValidate
             {
                 continue;
             }
+            List<Path> versionDirs;
             try (java.util.stream.Stream<Path> versions = Files.list(typeDir))
             {
-                for (Path versionDir : versions.filter(Files::isDirectory).sorted().toList())
+                versionDirs = versions.filter(Files::isDirectory).sorted().toList();
+            }
+            catch (IOException | java.io.UncheckedIOException ex)
+            {
+                // B-T review lane 2 L3: a listing error is reported, never a failed install
+                out.add("could not list " + typeDir + " (" + ex.getMessage()
+                        + ") — its house formats are unknown");
+                continue;
+            }
+            for (Path versionDir : versionDirs)
+            {
+                for (String name : List.of(type + ".json", type + ".json.gz"))
                 {
-                    for (String name : List.of(type + ".json", type + ".json.gz"))
+                    Path file = versionDir.resolve(name);
+                    if (!Files.isRegularFile(file))
                     {
-                        Path file = versionDir.resolve(name);
-                        if (Files.isRegularFile(file) && HouseDictionaryReader.readHeader(file)
+                        continue;
+                    }
+                    try
+                    {
+                        if (HouseDictionaryReader.readHeader(file)
                                 .houseFormat() < ValueMapDictionary.HOUSE_FORMAT_2)
                         {
                             out.add(type + " " + versionDir.getFileName() + " is house format 1 — "
@@ -1313,11 +1330,14 @@ public final class CdiscValidate
                                     + "labels of house format 2");
                         }
                     }
+                    catch (IOException | RuntimeException ex)
+                    {
+                        // B-T review lane 2 L3: per file — one unreadable file no longer ends the
+                        // scan of its type's other versions, and it is named, not logged at DEBUG
+                        out.add("could not read " + file + " (" + ex.getMessage()
+                                + ") — its house format is unknown");
+                    }
                 }
-            }
-            catch (IOException ex)
-            {
-                LOGGER.log(System.Logger.Level.DEBUG, "could not scan " + typeDir, ex);
             }
         }
         return out;
@@ -2548,7 +2568,8 @@ public final class CdiscValidate
         out.println("                                   MedDRA / WHODrug); warns about format-1");
         out.println("                                   MedDRA / WHODrug files in the store.");
         out.println("       --set-default               rebind an existing manifest selection to");
-        out.println("                                   the version being installed");
+        out.println("                                   the version being installed, also one");
+        out.println("                                   already in the store (a deliberate act)");
         out.println("       --skip-installed            leave a type/version that is already in");
         out.println("                                   the store untouched (idempotent re-runs,");
         out.println("                                   e.g. a container entrypoint)");
@@ -2923,8 +2944,9 @@ public final class CdiscValidate
 
         @Option(names = "--set-default",
                 description = "With --install-dictionaries: rebind the selection-manifest entry to "
-                        + "the version being installed even when one already exists (default: an "
-                        + "existing entry is left alone).")
+                        + "the version being installed even when one already exists, also a "
+                        + "version already in the store (default: an existing entry is left "
+                        + "alone).")
         boolean setDefaultDictionaries;
 
         @Option(names = "--skip-installed",
