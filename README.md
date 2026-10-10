@@ -373,9 +373,27 @@ of the CDISC Library client, and the only path that reads it is `--seed-cache-fr
 validation run calls the Library any more — `-vx` reads its CT and Library metadata from the
 store like every other check.
 
-`--install-dictionaries` populates the dictionary store and exits; with no inputs it downloads the
-credential-free MED-RT, UNII and neoplasm sets. It is a local maintenance mode and is rejected in
-combination with `--remote`.
+`--install-dictionaries` converts each raw distribution into the store's house format and exits:
+with no inputs it downloads the credential-free MED-RT, UNII and neoplasm sets; `--meddra <dir>`,
+`--whodrug <dir>`, `--loinc <dir>`, `--medrt <dir>`, `--unii <dir>`, `--snomed <dir>` and
+`--neoplasm <dir>` convert a local distribution. The code lives in the shared module
+`cumba-oss-datatable-dictionary` (package `net.cumba.datatable.dictionary.convert`).
+
+- **It writes house format 2** — the `decodes` section gives MedDRA and WHODrug code levels their
+  names. No rule reads it, so findings are the same for format 1 and format 2 files.
+- ⚠ **A house-format-1 MedDRA / WHODrug file in the store prints one WARNING** per file
+  (`meddra 27.0 is house format 1 — re-install it (--meddra <dir>) …`). Re-run the install with that
+  version's distribution to rewrite it; an unreadable file is reported and the rest still listed.
+- **`--set-default` is an explicit rebind**: it moves `selected-versions.json` to the version being
+  installed, also to one already in the store. Without it a re-install, or the install of a second
+  version, leaves the selection alone.
+- `--skip-installed` leaves a type/version already in the store untouched (container entrypoints);
+  `--dry-run` writes nothing.
+- A local distribution's `SOURCES.md` section records the SHA-256 of every file the converter read;
+  each house file is written to a temporary name and moved into place atomically.
+
+It is a local maintenance mode and is rejected in combination with `--remote`. The format's
+specification is `cumba-oss-corej` `lib/cumba-oss-corej-core/dictionaries/README.md`.
 
 ## Containers
 
