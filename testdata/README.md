@@ -22,7 +22,7 @@ The CDISC example content in this folder comes from CDISC's Dataset-JSON reposit
 - **Source:** `cdisc-org/DataExchange-DatasetJson`, <https://github.com/cdisc-org/DataExchange-DatasetJson>,
   folders `examples/adam/` and `examples/sdtm/`.
 - **Compared against:** commit `a379f49a3f43c2aaed63bdeca761bdb7140df2c3` (HEAD of `master`, committed 2025-12-06),
-  retrieved 2026-10-14. `examples/adam/adsl.xpt` was added in commit `8bb999d8` (2022-07-08).
+  retrieved 2026-10-14. `examples/adam/adsl.xpt` was added in commit `8bb999d8` (2022-07-08); our bytes match the revision of commit `23b6435f` (2023-06-22), which is still the file at HEAD.
 - **Content:** CDISC's ADaM and SDTM example datasets, labelled study `CDISCPILOT01` (CDISC pilot study data as
   updated by the CDISC teams for these examples). They are example data, not real study data.
 - **Licence:** the repository's `LICENSE`, the MIT License with the copyright line *"Copyright (c) 2022 cdisc"*,
